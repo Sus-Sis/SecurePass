@@ -1,0 +1,77 @@
+<mxfile host="app.diagrams.net" modified="2026-06-09T23:35:00.000Z" agent="Antigravity" version="21.0.0" type="device">
+  <diagram id="arch_diag" name="System Architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <mxCell id="title" value="SecurePass - System Architecture" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Client Boundary -->
+        <mxCell id="client_boundary" value="Client Boundary" style="swimlane;whiteSpace=wrap;html=1;dashed=0;fillColor=#FFFFFF;strokeColor=#000000;fontSize=12;fontColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="100" width="320" height="600" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="react_dashboard" value="React Web App&#xa;&#xa;- AuthContext.jsx&#xa;- api.js" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="client_boundary">
+          <mxGeometry x="25" y="40" width="270" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="browser_ext" value="Browser Extension&#xa;&#xa;- popup.html / popup.js&#xa;- background.js&#xa;- content.js" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="client_boundary">
+          <mxGeometry x="25" y="155" width="270" height="100" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="web_crypto" value="Web Crypto API&#xa;&#xa;- PBKDF2 (600k iterations)&#xa;- AES-256-GCM (Vault Enc/Dec)&#xa;- SHA-256 (Key &amp; Verifier Hashes)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="client_boundary">
+          <mxGeometry x="25" y="290" width="270" height="110" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="in_memory_state" value="In-Memory State&#xa;&#xa;- Master Key (in memory only)&#xa;- Decrypted/Encrypted Vault" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="client_boundary">
+          <mxGeometry x="25" y="435" width="270" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Gateway Layer -->
+        <mxCell id="cors_gateway" value="CORS &amp; Auth Gateway&#xa;&#xa;- Schemed Origin Regex Filter&#xa;- JWT Bearer Token Security" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;fontStyle=0;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="450" y="325" width="220" height="95" as="geometry" />
+        </mxCell>
+
+        <!-- Backend Layer -->
+        <mxCell id="backend_server" value="FastAPI Backend App&#xa;&#xa;- Router (Registration, Login, MFA, Vault, Recovery)&#xa;- Bcrypt verifiers hasher&#xa;- PyOTP engine" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="750" y="210" width="300" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ORM -->
+        <mxCell id="sqlalchemy_orm" value="SQLAlchemy ORM" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="750" y="375" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Database -->
+        <mxCell id="database_layer" value="PostgreSQL / SQLite Database&#xa;&#xa;- users (email, salt, verifier hash, encrypted_vault, ...)&#xa;- sessions (user_id, token_hash, expires_at)&#xa;- activity_logs (user_id, action, ip, ua, timestamp)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#FFFFFF;strokeColor=#000000;fontColor=#000000;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="750" y="475" width="300" height="135" as="geometry" />
+        </mxCell>
+
+        <!-- Connections -->
+        <mxCell id="conn_react_gateway" value="HTTPS" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="react_dashboard" target="cors_gateway">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="conn_ext_gateway" value="HTTPS" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser_ext" target="cors_gateway">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="conn_crypto_gateway" value="HTTPS" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="web_crypto" target="cors_gateway">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="conn_gateway_backend" value="" style="endArrow=classic;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="cors_gateway" target="backend_server">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="conn_backend_orm" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="backend_server" target="sqlalchemy_orm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="conn_orm_db" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryCm=0;" edge="1" parent="1" source="sqlalchemy_orm" target="database_layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

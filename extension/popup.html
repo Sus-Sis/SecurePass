@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecurePass Popup</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="pop-header">
+    <div class="pop-brand">
+      <span>🛡️ SecurePass</span>
+    </div>
+  </header>
+
+  <main class="pop-main">
+    <!-- Screen 1: Disconnected / Locked Warning -->
+    <div id="screen-disconnected" class="screen">
+      <div class="warning-icon">🔒</div>
+      <h3>Vault is Locked</h3>
+      <p class="warning-text">
+        Please open and unlock the SecurePass web application dashboard to access your credentials.
+      </p>
+      <button id="btn-open-dashboard-locked" class="btn btn-primary">
+        Open Dashboard
+      </button>
+    </div>
+
+    <!-- Screen 2: Active Credentials List -->
+    <div id="screen-connected" class="screen hidden">
+      <div id="current-site-header" class="site-header">
+        <span class="site-label">Credentials for this site:</span>
+        <span id="current-domain-display" class="site-domain">domain.com</span>
+      </div>
+
+      <div id="credentials-list" class="list-container">
+        <!-- populated dynamically -->
+      </div>
+
+      <div id="no-credentials-text" class="empty-text hidden">
+        No credentials saved for this website.
+      </div>
+
+      <button id="btn-open-dashboard" class="btn btn-secondary">
+        Go to Web Dashboard
+      </button>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden">Copied!</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

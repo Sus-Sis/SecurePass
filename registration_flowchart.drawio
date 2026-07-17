@@ -1,0 +1,63 @@
+<mxfile host="app.diagrams.net" modified="2026-06-10T00:00:00.000Z" agent="Antigravity" version="21.0.0" type="device">
+  <diagram id="reg_diag" name="Registration Flow">
+    <mxGraphModel dx="1000" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <mxCell id="title" value="SecurePass - Registration Flow" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="275" y="30" width="300" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_start" value="Start Registration" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.terminator;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="350" y="100" width="150" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_step1" value="Input Email &amp; Master Password" style="html=1;shape=mxgraph.flowchart.manual_input;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="350" y="190" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_step2" value="Generate 64-byte Salt&#xa;&amp; derive Master Key (MK)&#xa;via PBKDF2 (600,000 iter)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="340" y="290" width="170" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_step3" value="1. Compute Verifier = SHA256(MK)&#xa;2. Encrypt Empty Vault using MK&#xa;3. Encrypt MK using Recovery Code" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="325" y="390" width="200" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_step4" value="POST payload to /api/auth/register&#xa;(salt, verifier, encrypted vault,&#xa;encrypted key recovery)" style="html=1;shape=mxgraph.flowchart.document;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="330" y="500" width="190" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_step5" value="Server hashes Verifier with Bcrypt&#xa;&amp; stores in Database" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="340" y="610" width="170" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reg_end" value="End Registration" style="strokeWidth=2;html=1;shape=mxgraph.flowchart.terminator;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#000000;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="350" y="710" width="150" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Connections -->
+        <mxCell id="reg_c1" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;exitPerimeter=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="reg_start" target="reg_step1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_c2" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="reg_step1" target="reg_step2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_c3" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="reg_step2" target="reg_step3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_c4" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="reg_step3" target="reg_step4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_c5" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="reg_step4" target="reg_step5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="reg_c6" value="" style="endArrow=classic;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=1;" edge="1" parent="1" source="reg_step5" target="reg_end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

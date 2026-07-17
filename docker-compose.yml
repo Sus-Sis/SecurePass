@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: securepass_db
+    environment:
+      POSTGRES_USER: securepass_admin
+      POSTGRES_PASSWORD: securepass_super_secret_password
+      POSTGRES_DB: securepass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securepass_admin -d securepass"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: securepass_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://securepass_admin:securepass_super_secret_password@db:5432/securepass
+      - JWT_SECRET_KEY=docker_compose_override_jwt_secret_key_change_in_production
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,chrome-extension://*,moz-extension://*
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+volumes:
+  pgdata:
