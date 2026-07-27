@@ -81,4 +81,8 @@ export const api = {
     
   verifyRecovery: (data) => 
     request("/api/auth/recovery/verify", "POST", data),
+
+  // AI Phishing Scan
+  scanUrl: (url) => 
+    request("/api/scan-url", "POST", { url }),
 };

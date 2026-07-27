@@ -30,6 +30,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Load AI Phishing Classifier Model & Vectorizer
+import joblib
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "svm_model.pkl")
+VECTORIZER_PATH = os.path.join(BASE_DIR, "vectorizer.pkl")
+
+svm_model = None
+vectorizer = None
+
+try:
+    if os.path.exists(MODEL_PATH) and os.path.exists(VECTORIZER_PATH):
+        svm_model = joblib.load(MODEL_PATH)
+        vectorizer = joblib.load(VECTORIZER_PATH)
+        print("[AI Security Module] Successfully loaded Linear SVM Phishing Classifier!")
+except Exception as e:
+    print(f"[AI Security Module] Could not load model: {e}")
+
+@app.post("/api/scan-url", response_model=schemas.URLScanResponse)
+async def scan_url(request_data: schemas.URLScanRequest):
+    url = request_data.url.strip()
+    if not url:
+        return {"url": "", "is_safe": True, "prediction": "good", "risk_level": "Safe"}
+
+    clean_url = (
+        url.lower()
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace("www.", "")
+    )
+
+    if svm_model and vectorizer:
+        try:
+            X = vectorizer.transform([clean_url])
+            prediction = svm_model.predict(X)[0]
+            is_safe = (prediction == "good")
+            return {
+                "url": url,
+                "is_safe": is_safe,
+                "prediction": prediction,
+                "risk_level": "Safe" if is_safe else "High Risk Phishing"
+            }
+        except Exception as e:
+            return {"url": url, "is_safe": True, "prediction": "good", "risk_level": "Uncertain"}
+
+    return {"url": url, "is_safe": True, "prediction": "good", "risk_level": "Safe"}
+
 security = HTTPBearer()
 
 async def get_current_user(

@@ -101,18 +101,29 @@ SecurePass/
    cd backend
    ```
 2. Initialize virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     py -m venv venv_win
+     .\venv_win\Scripts\activate
+     ```
+   - **macOS / Linux**:
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 4. Start the FastAPI development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     python -m uvicorn app.main:app --reload --port 8000
+     ```
+   - **macOS / Linux**:
+     ```bash
+     uvicorn app.main:app --reload --port 8000
+     ```
    *Note: If no database URL environment variable is set, FastAPI will automatically create and connect to a local SQLite database file named `securepass.db` in your backend directory.*
 
 ---

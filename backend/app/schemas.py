@@ -25,6 +25,15 @@ class PreloginRequest(BaseModel):
 class PreloginResponse(BaseModel):
     salt: str
 
+class URLScanRequest(BaseModel):
+    url: str
+
+class URLScanResponse(BaseModel):
+    url: str
+    is_safe: bool
+    prediction: str
+    risk_level: str
+
 
 class LoginResponse(BaseModel):
     access_token: Optional[str] = None
