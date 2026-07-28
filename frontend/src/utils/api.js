@@ -21,7 +21,6 @@ async function request(endpoint, method = "GET", body = null, token = null) {
   const response = await fetch(`${API_BASE}${endpoint}`, config);
   
   if (response.status === 401) {
-    // Session expired or invalid - let context handle it
     const errData = await response.json().catch(() => ({}));
     throw new Error(errData.detail || "Unauthorized");
   }
@@ -40,6 +39,12 @@ export const api = {
   
   prelogin: (data) => request("/api/auth/prelogin", "POST", data),
   
+  srpChallenge: (email, client_A) => 
+    request("/api/auth/srp/challenge", "POST", { email, client_A }),
+    
+  srpAuthenticate: (email, client_A, client_M1, mfaCode = null) => 
+    request("/api/auth/srp/authenticate", "POST", { email, client_A, client_M1, mfa_code: mfaCode }),
+
   login: (email, verifier, mfaCode = null) => 
     request("/api/auth/login", "POST", { email, verifier, mfa_code: mfaCode }),
     

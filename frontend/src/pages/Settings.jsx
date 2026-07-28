@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../utils/api";
 import { useNavigate } from "react-router-dom";
-import { deriveMasterKey, computeAuthVerifier } from "../utils/crypto";
 
 export default function Settings() {
   const { token, logout, changeMasterPassword, decryptedVault, user } = useAuth();
@@ -14,10 +13,11 @@ export default function Settings() {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [pwdError, setPwdError] = useState("");
   const [pwdSuccess, setPwdSuccess] = useState("");
+  const [newRecoveryCode, setNewRecoveryCode] = useState("");
 
   // MFA States
   const [mfaEnabled, setMfaEnabled] = useState(false);
-  const [mfaSetupData, setMfaSetupData] = useState(null); // { qr_code_url, secret }
+  const [mfaSetupData, setMfaSetupData] = useState(null);
   const [mfaVerifyCode, setMfaVerifyCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [mfaSuccess, setMfaSuccess] = useState("");
@@ -38,7 +38,6 @@ export default function Settings() {
   // General Message State
   const [toastMessage, setToastMessage] = useState("");
 
-  // Fetch Activity Logs & MFA status on mount
   useEffect(() => {
     fetchLogs();
     checkUserMfaStatus();
@@ -88,40 +87,18 @@ export default function Settings() {
     }
 
     try {
-      // 1. Derive re-encryption details in AuthContext
-      const changePayload = await changeMasterPassword(currentPassword, newPassword);
-      
-      // 2. Submit change request to server
-      // The current verifier should be calculated using the old salt
-      const oldSalt = await api.prelogin({ email: user.email }).then(r => r.salt);
-      const oldMK = await deriveMasterKey(currentPassword, oldSalt);
-      const currentVerifierHex = await computeAuthVerifier(oldMK);
-
-      await api.changePassword(token, {
-        current_verifier: currentVerifierHex,
-        new_salt: changePayload.newSalt,
-        new_verifier: changePayload.newVerifier,
-        new_encrypted_vault: changePayload.newEncryptedVault,
-        new_encrypted_key_recovery: changePayload.newEncryptedMKRecovery,
-        new_recovery_codes_hash: changePayload.recoveryHash
-      });
-
-      setPwdSuccess("Master password successfully updated! All other sessions have been logged out.");
+      const { recoveryCode } = await changeMasterPassword(currentPassword, newPassword);
+      setNewRecoveryCode(recoveryCode);
+      setPwdSuccess("Master password successfully updated! Save your new recovery code below.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmNewPassword("");
-      
-      // Since changing password logs out all sessions, let's delay logout slightly so the user sees the success message
-      setTimeout(() => {
-        logout();
-        navigate("/login");
-      }, 3000);
+      fetchLogs();
     } catch (err) {
       setPwdError(err.message || "Failed to update master password.");
     }
   };
 
-  // MFA Setup
   const handleInitiateMfa = async () => {
     setMfaError("");
     setMfaSuccess("");
@@ -165,7 +142,6 @@ export default function Settings() {
     }
   };
 
-  // Exports
   const handleExportVault = () => {
     if (!decryptedVault) return;
     const element = document.createElement("a");
@@ -179,7 +155,6 @@ export default function Settings() {
     showToast("Vault exported successfully.");
   };
 
-  // Delete account
   const handleDeleteAccountSubmit = async (e) => {
     e.preventDefault();
     setDeleteError("");
@@ -200,7 +175,6 @@ export default function Settings() {
     }
   };
 
-  // Logs Export
   const handleExportLogsCSV = () => {
     if (logs.length === 0) return;
     const headers = "Action,Timestamp,IP Address\n";
@@ -273,6 +247,15 @@ export default function Settings() {
             Update Master Password
           </button>
         </form>
+
+        {newRecoveryCode && (
+          <div className="recovery-box" style={{ marginTop: '1rem' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Your password has been changed! Here is your NEW recovery code:
+            </p>
+            <div className="recovery-code-display">{newRecoveryCode}</div>
+          </div>
+        )}
       </section>
 
       {/* 2. Multi-Factor Authentication Section */}
@@ -495,7 +478,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Global Toast confirmation */}
       {toastMessage && (
         <div className="toast">
           <svg width="18" height="18" fill="none" stroke="var(--accent-green)" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>

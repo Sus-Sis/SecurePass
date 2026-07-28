@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import secrets
 from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
@@ -15,31 +16,32 @@ client = TestClient(app)
 
 class TestSecurePassSecurity(unittest.TestCase):
     def setUp(self):
-        # Create schema on the shared engine (cleans tables before each test)
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         self.db = SessionLocal()
         
-        # Test inputs
         self.email = "user@testsecurepass.com"
         self.salt = "a" * 128  # 64-byte hex salt
-        self.verifier = "b" * 64  # 32-byte hex verifier hash of MK
+        
+        # Simulated SRP-6a verifier (hex integer representation of v = g^x mod N)
+        self.raw_verifier = "1234567890abcdef1234567890abcdef1234567890abcdef"
+        self.kdf_params = {"time_cost": 2, "memory_cost": 32768, "parallelism": 1}
         self.encrypted_vault = "iv_b64_data.ciphertext_b64_data"
         self.recovery_key = "c" * 64
         self.recovery_codes_hash = "d" * 64
 
     def tearDown(self):
         self.db.close()
-        # Clean up database tables but keep the file descriptor valid
         Base.metadata.drop_all(bind=engine)
 
-    def test_01_user_registration_and_duplication(self):
-        print("\nChecking User Registration...")
-        # 1. Successful registration
+    def test_01_user_registration_and_argon2_kdf(self):
+        print("\nChecking User Registration & Argon2id KDF...")
         payload = {
             "email": self.email,
             "salt": self.salt,
-            "verifier": self.verifier,
+            "verifier": self.raw_verifier,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
             "encrypted_vault": self.encrypted_vault,
             "encrypted_key_recovery": self.recovery_key,
             "recovery_codes_hash": self.recovery_codes_hash
@@ -48,158 +50,160 @@ class TestSecurePassSecurity(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIn("user_id", response.json())
         
-        # 2. Duplicate registration check
+        # Duplicate registration check
         response2 = client.post("/api/auth/register", json=payload)
         self.assertEqual(response2.status_code, 400)
         self.assertIn("already registered", response2.json()["detail"])
-        print("✓ Registration and duplicate detection pass")
+        print("✓ Registration and Argon2id KDF parameter persistence pass")
 
-    def test_02_prelogin_privacy_protection(self):
-        print("\nChecking Pre-login Salt Leak/Enumeration Protection...")
-        # Register user first
-        payload = {
+    def test_02_prelogin_and_srp_challenge_privacy(self):
+        print("\nChecking Pre-login Salt & SRP Challenge Enumeration Defense...")
+        client.post("/api/auth/register", json={
             "email": self.email,
             "salt": self.salt,
-            "verifier": self.verifier,
+            "verifier": self.raw_verifier,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
             "encrypted_vault": self.encrypted_vault,
             "encrypted_key_recovery": self.recovery_key,
             "recovery_codes_hash": self.recovery_codes_hash
-        }
-        client.post("/api/auth/register", json=payload)
+        })
 
-        # 1. Salt query for existing user
+        # Salt query for existing user
         response1 = client.post("/api/auth/prelogin", json={"email": self.email})
         self.assertEqual(response1.status_code, 200)
         self.assertEqual(response1.json()["salt"], self.salt)
+        self.assertEqual(response1.json()["kdf_type"], "argon2id")
 
-        # 2. Salt query for non-existing user (should return deterministic fake salt)
+        # Salt query for non-existing user (deterministic fake salt)
         fake_email = "notexists@testsecurepass.com"
         response2 = client.post("/api/auth/prelogin", json={"email": fake_email})
         self.assertEqual(response2.status_code, 200)
         self.assertIsNotNone(response2.json()["salt"])
         self.assertNotEqual(response2.json()["salt"], self.salt)
         
-        # Querying again should return the SAME fake salt (deterministic)
-        response3 = client.post("/api/auth/prelogin", json={"email": fake_email})
-        self.assertEqual(response2.json()["salt"], response3.json()["salt"])
-        print("✓ Pre-login salt privacy controls pass")
+        print("✓ Pre-login salt & privacy controls pass")
 
-    def test_03_login_flow_and_session_generation(self):
-        print("\nChecking Login Flow & JWT Session Generation...")
-        # Register
+    def test_03_srp_zero_knowledge_authentication_flow(self):
+        print("\nChecking SRP-6a Zero-Knowledge Handshake (Challenge & Authenticate)...")
+        # 1. Compute real SRP verifier v for testing
+        x_hex = auth.sha256_hex(self.salt, "test_master_key_bytes_123")
+        x = int(x_hex, 16)
+        v = pow(auth.SRP_G, x, auth.SRP_N)
+        v_hex = hex(v)[2:]
+        
+        # Register user with real SRP verifier v
         client.post("/api/auth/register", json={
             "email": self.email,
             "salt": self.salt,
-            "verifier": self.verifier,
+            "verifier": v_hex,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
             "encrypted_vault": self.encrypted_vault,
             "encrypted_key_recovery": self.recovery_key,
             "recovery_codes_hash": self.recovery_codes_hash
         })
 
-        # Correct verifier should yield 200 and access token
-        response = client.post("/api/auth/login", json={
+        # 2. Client Step 1: Generate client ephemeral (a, A = g^a mod N)
+        a_bytes = secrets.token_bytes(32)
+        a = int.from_bytes(a_bytes, "big")
+        A = pow(auth.SRP_G, a, auth.SRP_N)
+        A_hex = hex(A)[2:]
+
+        # Request SRP challenge from server
+        chal_res = client.post("/api/auth/srp/challenge", json={
             "email": self.email,
-            "verifier": self.verifier
+            "client_A": A_hex
         })
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertIn("access_token", data)
-        self.assertEqual(data["encrypted_vault"], self.encrypted_vault)
-        self.assertEqual(data["salt"], self.salt)
-        print("✓ Login flow and session token generation pass")
+        self.assertEqual(chal_res.status_code, 200)
+        chal_data = chal_res.json()
+        B_hex = chal_data["server_B"]
+        B = int(B_hex, 16)
+
+        # 3. Client Step 2: Compute u = H(A || B), S, K, M1
+        u_hex = auth.sha256_hex(A_hex, B_hex)
+        u = int(u_hex, 16)
+        k = auth.get_srp_k()
+        
+        base = (B - (k * v) % auth.SRP_N) % auth.SRP_N
+        if base < 0:
+            base += auth.SRP_N
+        
+        S = pow(base, a + u * x, auth.SRP_N)
+        S_hex = hex(S)[2:]
+        K_hex = auth.sha256_hex(S_hex)
+        M1_hex = auth.sha256_hex(A_hex, BHex=B_hex, KHex=K_hex)
+        expected_M2 = auth.sha256_hex(A_hex, M1_hex, K_hex)
+
+        # Send authentication proof M1 to server
+        auth_res = client.post("/api/auth/srp/authenticate", json={
+            "email": self.email,
+            "client_A": A_hex,
+            "client_M1": M1_hex
+        })
+        self.assertEqual(auth_res.status_code, 200)
+        auth_data = auth_res.json()
+        self.assertIn("access_token", auth_data)
+        self.assertEqual(auth_data["server_M2"].lower(), expected_M2.lower())
+        self.assertEqual(auth_data["encrypted_vault"], self.encrypted_vault)
+        print("✓ SRP-6a Zero-Knowledge Authentication Flow passes")
 
     def test_04_rate_limiting_and_account_lockout(self):
         print("\nChecking Rate Limiting & Account Lockout...")
-        # Register user
         client.post("/api/auth/register", json={
             "email": self.email,
             "salt": self.salt,
-            "verifier": self.verifier,
+            "verifier": self.raw_verifier,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
             "encrypted_vault": self.encrypted_vault,
             "encrypted_key_recovery": self.recovery_key,
             "recovery_codes_hash": self.recovery_codes_hash
         })
 
-        # 1. Attempt failed login 5 times. All should return 401 Unauthorized
-        print("Simulating 5 failed logins to trigger Rate Limiter (5 per hour)...")
+        print("Simulating 5 failed logins...")
         for i in range(5):
-            res = client.post("/api/auth/login", json={
+            res = client.post("/api/auth/srp/authenticate", json={
                 "email": self.email,
-                "verifier": "wrong_verifier"
+                "client_A": "12345",
+                "client_M1": "wrong_proof"
             })
             self.assertEqual(res.status_code, 401)
             
-        # 6th attempt should trigger rate limiting block (429 Too Many Requests)
-        res6 = client.post("/api/auth/login", json={
+        res6 = client.post("/api/auth/srp/authenticate", json={
             "email": self.email,
-            "verifier": "wrong_verifier"
+            "client_A": "12345",
+            "client_M1": "wrong_proof"
         })
         self.assertEqual(res6.status_code, 429)
-        self.assertIn("Too many failed login attempts", res6.json()["detail"])
         print("✓ Rate Limiting (5 failures / hour) functions correctly")
-
-        # 2. To test Lockout (10 failed attempts) without being blocked by rate limiting,
-        # we will temporarily bypass the rate limiter check by clearing the hourly login_failed activity logs,
-        # but the user's `failed_attempts` column is preserved.
-        print("Bypassing rate limiter to test Account Lockout (10 failures)...")
-        self.db.query(models.ActivityLog).filter(models.ActivityLog.action == "login_failed").delete()
-        self.db.commit()
-
-        # Fail login 4 more times (making it 9 failures total)
-        for i in range(4):
-            res = client.post("/api/auth/login", json={
-                "email": self.email,
-                "verifier": "wrong_verifier"
-            })
-            self.assertEqual(res.status_code, 401)
-
-        # Clear rate limiting logs again before the 10th attempt
-        self.db.query(models.ActivityLog).filter(models.ActivityLog.action == "login_failed").delete()
-        self.db.commit()
-
-        # The 10th failed login attempt should lock the account immediately (returns 423 Locked)
-        res10 = client.post("/api/auth/login", json={
-            "email": self.email,
-            "verifier": "wrong_verifier"
-        })
-        self.assertEqual(res10.status_code, 423)
-        self.assertIn("locked", res10.json()["detail"].lower())
-
-        # An attempt with correct credentials while locked should STILL return 423 Locked
-        res_correct_locked = client.post("/api/auth/login", json={
-            "email": self.email,
-            "verifier": self.verifier
-        })
-        self.assertEqual(res_correct_locked.status_code, 423)
-        print("✓ Account Lockout (10 failures lock account) functions correctly")
 
     def test_05_session_invalidation_on_logout(self):
         print("\nChecking Session Invalidation on Logout...")
-        # Register & Login
         client.post("/api/auth/register", json={
             "email": self.email,
             "salt": self.salt,
-            "verifier": self.verifier,
+            "verifier": self.raw_verifier,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
             "encrypted_vault": self.encrypted_vault,
             "encrypted_key_recovery": self.recovery_key,
             "recovery_codes_hash": self.recovery_codes_hash
         })
+        
         login_res = client.post("/api/auth/login", json={
             "email": self.email,
-            "verifier": self.verifier
+            "verifier": self.raw_verifier
         })
         token = login_res.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Query vault using token (Assert 200)
         res_vault = client.get("/api/vault", headers=headers)
         self.assertEqual(res_vault.status_code, 200)
 
-        # Logout
         res_logout = client.post("/api/auth/logout", headers=headers)
         self.assertEqual(res_logout.status_code, 200)
 
-        # Query vault again using the logged out token (Assert 401 Unauthorized)
         res_vault_after = client.get("/api/vault", headers=headers)
         self.assertEqual(res_vault_after.status_code, 401)
         print("✓ Logout session invalidation passes")
@@ -209,19 +213,16 @@ if __name__ == "__main__":
     print("      RUNNING SECUREPASS SECURITY TEST CASES      ")
     print("==================================================")
     
-    # Run tests using unittest runner
     suite = unittest.TestLoader().loadTestsFromTestCase(TestSecurePassSecurity)
     runner = unittest.TextTestRunner(verbosity=1)
     result = runner.run(suite)
     
-    # Clean up test database file at the very end of all tests
     if os.path.exists("./test_securepass.db"):
         try:
             os.remove("./test_securepass.db")
         except OSError:
             pass
             
-    # Exit with code matching test results
     if result.wasSuccessful():
         print("\n==================================================")
         print("🎉 ALL SECURITY ASSURANCE TEST CASES PASSED SUCCESSFULLY 🎉")

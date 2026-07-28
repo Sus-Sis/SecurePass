@@ -1,24 +1,35 @@
+import json
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session as DbSession
+from sqlalchemy import text
 from datetime import datetime, timedelta
 import os
 
 from . import models, schemas, crud, auth, database
 from .database import engine, get_db
 
-# Create database tables (if they don't exist)
+# Create database tables and auto-migrate SQLite schema
 models.Base.metadata.create_all(bind=engine)
+with engine.connect() as conn:
+    if database.DATABASE_URL.startswith("sqlite"):
+        try:
+            conn.execute(text("SELECT kdf_type FROM users LIMIT 1"))
+        except Exception:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN kdf_type VARCHAR(50) DEFAULT 'argon2id'"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN kdf_params TEXT"))
+                conn.commit()
+            except Exception as e:
+                print("[DB Migration Log]:", e)
 
-app = FastAPI(title="SecurePass API", version="1.0.0")
+app = FastAPI(title="SecurePass API", version="1.1.0")
 
 # Configure CORS
-# Allow localhost for react app, production origins from environment, and browser extensions
 CORS_ORIGINS_ENV = os.getenv("CORS_ORIGINS", "")
 ALLOWED_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_ENV.split(",") if origin.strip()]
 
-# Regex to match local development (localhost/127.0.0.1 with any port) and browser extensions
 ALLOWED_ORIGIN_REGEX = r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|chrome-extension://[a-zA-Z0-9\-]+|moz-extension://[a-zA-Z0-9\-]+)$"
 
 app.add_middleware(
@@ -98,7 +109,6 @@ async def get_current_user(
             detail="Token payload is missing subject",
         )
         
-    # Check if session exists and is not expired
     token_hash = auth.hash_sha256(token)
     db_session = crud.get_session_by_token(db, token_hash)
     if not db_session:
@@ -116,7 +126,6 @@ async def get_current_user(
     return user
 
 def get_client_ip(request: Request) -> str:
-    """Helper to extract IP address from request, checking headers for proxies."""
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
@@ -130,7 +139,6 @@ async def register(
     request: Request,
     db: DbSession = Depends(get_db)
 ):
-    # Check if user already exists
     existing_user = crud.get_user_by_email(db, user_data.email)
     if existing_user:
         raise HTTPException(
@@ -138,19 +146,19 @@ async def register(
             detail="Email address already registered"
         )
         
-    # Hash the client's verifier and recovery code
-    hashed_verifier = auth.hash_verifier(user_data.verifier)
-    hashed_recovery = auth.hash_verifier(user_data.recovery_codes_hash) # Store using bcrypt for max safety
+    stored_verifier = user_data.verifier
+    if not user_data.verifier.startswith("$2b$") and len(user_data.verifier) < 60:
+        stored_verifier = auth.hash_verifier(user_data.verifier)
+        
+    hashed_recovery = auth.hash_verifier(user_data.recovery_codes_hash)
     
-    # Create the user
     new_user = crud.create_user(
         db=db,
         user=user_data,
-        hashed_verifier=hashed_verifier,
+        hashed_verifier=stored_verifier,
         hashed_recovery_code=hashed_recovery
     )
     
-    # Log registration activity
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent", "unknown")
     crud.create_activity_log(db, new_user.id, "account_registered", ip, ua)
@@ -165,12 +173,147 @@ async def prelogin(
     email = prelogin_data.email.lower()
     user = crud.get_user_by_email(db, email)
     if user:
-        return {"salt": user.salt}
+        kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
+        return {
+            "salt": user.salt,
+            "kdf_type": user.kdf_type or "argon2id",
+            "kdf_params": kdf_params_dict
+        }
     
-    # Deteministic fake salt for security against user enumeration
     fake_salt_material = f"{email}:{auth.SECRET_KEY}"
     fake_salt = auth.hash_sha256(fake_salt_material)
-    return {"salt": fake_salt}
+    return {
+        "salt": fake_salt,
+        "kdf_type": "argon2id",
+        "kdf_params": {"time_cost": 2, "memory_cost": 4096, "parallelism": 1}
+    }
+
+# SRP-6a Zero-Knowledge Authentication Endpoints
+
+@app.post("/api/auth/srp/challenge", response_model=schemas.SRPChallengeResponse)
+async def srp_challenge(
+    req: schemas.SRPChallengeRequest,
+    db: DbSession = Depends(get_db)
+):
+    email = req.email.lower()
+    if auth.check_rate_limit_exceeded(db, email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again in an hour."
+        )
+        
+    user = crud.get_user_by_email(db, email)
+    if user:
+        if user.verifier.startswith("$2b$") or user.verifier.startswith("$2a$") or len(user.verifier) < 64:
+            return schemas.SRPChallengeResponse(
+                salt=user.salt,
+                server_B="",
+                kdf_type="pbkdf2",
+                kdf_params=None
+            )
+        kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
+        try:
+            server_B = auth.generate_srp_challenge(email, req.client_A, user.verifier)
+            return schemas.SRPChallengeResponse(
+                salt=user.salt,
+                server_B=server_B,
+                kdf_type=user.kdf_type or "argon2id",
+                kdf_params=kdf_params_dict
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+            
+    fake_salt = auth.hash_sha256(f"{email}:{auth.SECRET_KEY}")
+    fake_verifier = auth.hash_sha256(f"{email}:fake_verifier:{auth.SECRET_KEY}")
+    server_B = auth.generate_srp_challenge(email, req.client_A, fake_verifier)
+    return schemas.SRPChallengeResponse(
+        salt=fake_salt,
+        server_B=server_B,
+        kdf_type="argon2id",
+        kdf_params={"time_cost": 2, "memory_cost": 4096, "parallelism": 1}
+    )
+
+@app.post("/api/auth/srp/authenticate", response_model=schemas.SRPAuthenticateResponse)
+async def srp_authenticate(
+    req: schemas.SRPAuthenticateRequest,
+    request: Request,
+    db: DbSession = Depends(get_db)
+):
+    email = req.email.lower()
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "unknown")
+    
+    if auth.check_rate_limit_exceeded(db, email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again in an hour."
+        )
+        
+    user = crud.get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or authentication proof"
+        )
+        
+    if user.locked_until and user.locked_until > datetime.utcnow():
+        lock_remaining = int((user.locked_until - datetime.utcnow()).total_seconds() / 60)
+        raise HTTPException(
+            status_code=423,
+            detail=f"Account is temporarily locked due to multiple failures. Try again in {lock_remaining} minutes."
+        )
+        
+    valid, server_M2 = auth.verify_srp_proof(email, req.client_A, req.client_M1)
+    if not valid:
+        crud.increment_failed_attempts(db, user)
+        crud.create_activity_log(db, user.id, "login_failed_srp", ip, ua)
+        if user.failed_attempts >= 10:
+            raise HTTPException(
+                status_code=423,
+                detail="Account is temporarily locked due to 10 failed attempts. Try again in 15 minutes."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or authentication proof"
+        )
+        
+    if user.mfa_enabled:
+        if not req.mfa_code:
+            return schemas.SRPAuthenticateResponse(mfa_required=True, message="MFA verification required")
+            
+        if not auth.verify_totp(user.mfa_secret, req.mfa_code):
+            crud.increment_failed_attempts(db, user)
+            crud.create_activity_log(db, user.id, "login_failed_mfa", ip, ua)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid MFA verification code"
+            )
+            
+    crud.reset_failed_attempts(db, user)
+    user.last_login = datetime.utcnow()
+    db.commit()
+    
+    access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = auth.create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    
+    token_hash = auth.hash_sha256(access_token)
+    expires_at = datetime.utcnow() + access_token_expires
+    crud.create_session(db, user.id, token_hash, expires_at)
+    
+    crud.create_activity_log(db, user.id, "login_success_srp", ip, ua)
+    
+    kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
+    
+    return schemas.SRPAuthenticateResponse(
+        access_token=access_token,
+        server_M2=server_M2,
+        encrypted_vault=user.encrypted_vault,
+        salt=user.salt,
+        kdf_type=user.kdf_type or "argon2id",
+        kdf_params=kdf_params_dict
+    )
 
 @app.post("/api/auth/login", response_model=schemas.LoginResponse)
 async def login(
@@ -182,7 +325,6 @@ async def login(
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent", "unknown")
     
-    # 1. Rate Limiting Check (5 attempts per hour)
     if auth.check_rate_limit_exceeded(db, email):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -191,27 +333,21 @@ async def login(
         
     user = crud.get_user_by_email(db, email)
     if not user:
-        # Prevent timing attacks but log attempt
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
         
-    # 2. Account Lockout Check (10 failed attempts)
     if user.locked_until and user.locked_until > datetime.utcnow():
         lock_remaining = int((user.locked_until - datetime.utcnow()).total_seconds() / 60)
         raise HTTPException(
-            status_code=423, # Locked
+            status_code=423,
             detail=f"Account is temporarily locked due to multiple failures. Try again in {lock_remaining} minutes."
         )
         
-    # Verify the credentials (comparing bcrypt hash of the verifier)
     if not auth.verify_verifier(login_data.verifier, user.verifier):
-        # Record failure
         crud.increment_failed_attempts(db, user)
         crud.create_activity_log(db, user.id, "login_failed", ip, ua)
-        
-        # Check if this attempt just locked the account
         if user.failed_attempts >= 10:
             raise HTTPException(
                 status_code=423,
@@ -222,13 +358,10 @@ async def login(
             detail="Invalid email or password"
         )
         
-    # Credentials are correct - Check if MFA is required
     if user.mfa_enabled:
         if not login_data.mfa_code:
-            # Tell client MFA is required, don't issue token yet
-            return schemas.LoginResponse(mfa_required=True, email=user.email)
+            return schemas.LoginResponse(mfa_required=True, message="MFA verification required")
             
-        # Verify MFA code
         if not auth.verify_totp(user.mfa_secret, login_data.mfa_code):
             crud.increment_failed_attempts(db, user)
             crud.create_activity_log(db, user.id, "login_failed_mfa", ip, ua)
@@ -237,31 +370,29 @@ async def login(
                 detail="Invalid MFA verification code"
             )
             
-    # Reset failed attempts on success
     crud.reset_failed_attempts(db, user)
-    
-    # Update last login time
     user.last_login = datetime.utcnow()
     db.commit()
     
-    # Create Session and JWT Access Token
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     
-    # Store hashed session token
     token_hash = auth.hash_sha256(access_token)
     expires_at = datetime.utcnow() + access_token_expires
     crud.create_session(db, user.id, token_hash, expires_at)
     
-    # Log successful login
     crud.create_activity_log(db, user.id, "login_success", ip, ua)
+    
+    kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
     
     return schemas.LoginResponse(
         access_token=access_token,
         encrypted_vault=user.encrypted_vault,
-        salt=user.salt
+        salt=user.salt,
+        kdf_type=user.kdf_type or "argon2id",
+        kdf_params=kdf_params_dict
     )
 
 @app.post("/api/auth/logout", response_model=schemas.LogoutResponse)
@@ -273,7 +404,6 @@ async def logout(
     token = credentials.credentials
     token_hash = auth.hash_sha256(token)
     
-    # Find and delete the session
     db_session = crud.get_session_by_token(db, token_hash)
     if db_session:
         user_id = db_session.user_id
@@ -302,7 +432,6 @@ async def mfa_enable(
     current_user: models.User = Depends(get_current_user),
     db: DbSession = Depends(get_db)
 ):
-    # Generate TOTP secret but do not enable it until verified
     secret = auth.generate_totp_secret()
     crud.update_mfa_secret(db, current_user.id, secret, enabled=False)
     
@@ -328,7 +457,6 @@ async def mfa_verify(
             detail="MFA setup was not initiated"
         )
         
-    # Verify the code
     is_valid = auth.verify_totp(current_user.mfa_secret, verify_data.totp_code)
     if not is_valid:
         raise HTTPException(
@@ -336,7 +464,6 @@ async def mfa_verify(
             detail="Invalid verification code"
         )
         
-    # Enable MFA
     crud.update_mfa_secret(db, current_user.id, current_user.mfa_secret, enabled=True)
     
     ip = get_client_ip(request)
@@ -358,7 +485,6 @@ async def mfa_disable(
             detail="MFA is not enabled"
         )
         
-    # Verify code to confirm disable
     is_valid = auth.verify_totp(current_user.mfa_secret, verify_data.totp_code)
     if not is_valid:
         raise HTTPException(
@@ -366,7 +492,6 @@ async def mfa_disable(
             detail="Invalid verification code"
         )
         
-    # Disable MFA
     crud.update_mfa_secret(db, current_user.id, secret=None, enabled=False)
     
     ip = get_client_ip(request)
@@ -381,8 +506,6 @@ async def mfa_disable(
 async def get_vault(
     current_user: models.User = Depends(get_current_user)
 ):
-    # Returns the user's encrypted vault
-    # In database, created_at is datetime, so we can use current datetime or last log for last modified
     return schemas.VaultResponse(
         encrypted_vault=current_user.encrypted_vault or "[]",
         last_modified=current_user.last_login or datetime.utcnow()
@@ -403,7 +526,7 @@ async def update_vault(
     
     return schemas.VaultUpdateResponse(
         message="Vault synchronized successfully",
-        version=1  # Versioning placeholder
+        version=1
     )
 
 @app.get("/api/vault/export", response_model=schemas.VaultResponse)
@@ -412,7 +535,6 @@ async def export_vault(
     current_user: models.User = Depends(get_current_user),
     db: DbSession = Depends(get_db)
 ):
-    # Log the export action (highly sensitive!)
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent", "unknown")
     crud.create_activity_log(db, current_user.id, "vault_exported", ip, ua)
@@ -442,7 +564,6 @@ async def create_log(
     ip = get_client_ip(request)
     ua = request.headers.get("user-agent", "unknown")
     
-    # We restrict allowed actions client can submit to prevent log spoofing
     allowed_actions = ["credential_copied_username", "credential_copied_password", "credential_viewed"]
     if log_data.action not in allowed_actions:
         raise HTTPException(
@@ -466,14 +587,17 @@ async def recovery_initiate(
     ua = request.headers.get("user-agent", "unknown")
     
     if not user:
-        # Prevent timing attacks: return generic success message but log internally
         return schemas.RecoveryInitiateResponse(message="If the email is registered, recovery payload is initialized.")
         
     crud.create_activity_log(db, user.id, "recovery_initiated", ip, ua)
     
+    kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
+    
     return schemas.RecoveryInitiateResponse(
         message="Recovery payload successfully fetched.",
         salt=user.salt,
+        kdf_type=user.kdf_type or "argon2id",
+        kdf_params=kdf_params_dict,
         encrypted_key_recovery=user.encrypted_key_recovery,
         encrypted_vault=user.encrypted_vault
     )
@@ -494,7 +618,6 @@ async def recovery_verify(
             detail="Account recovery is unavailable or not set up for this email."
         )
         
-    # Verify recovery code using bcrypt comparison (since we hashed recovery code on registration)
     if not auth.verify_verifier(rec_data.recovery_code, user.recovery_codes_hash):
         crud.increment_failed_attempts(db, user)
         crud.create_activity_log(db, user.id, "recovery_failed", ip, ua)
@@ -503,23 +626,24 @@ async def recovery_verify(
             detail="Invalid recovery code."
         )
         
-    # Setup new credentials
-    new_hashed_verifier = auth.hash_verifier(rec_data.new_verifier)
-    new_hashed_recovery = auth.hash_verifier(rec_data.recovery_code) # Keep recovery code, or client can generate new one, we save it hashed
+    stored_verifier = rec_data.new_verifier
+    if not rec_data.new_verifier.startswith("$2b$") and len(rec_data.new_verifier) < 60:
+        stored_verifier = auth.hash_verifier(rec_data.new_verifier)
+    new_hashed_recovery = auth.hash_verifier(rec_data.recovery_code)
     
     crud.update_user_security(
         db=db,
         user_id=user.id,
         new_salt=rec_data.new_salt,
-        new_verifier=new_hashed_verifier,
+        new_verifier=stored_verifier,
         new_encrypted_vault=rec_data.new_encrypted_vault,
         new_encrypted_key_recovery=rec_data.new_encrypted_key_recovery,
-        new_recovery_hash=new_hashed_recovery
+        new_recovery_hash=new_hashed_recovery,
+        kdf_type="argon2id",
+        kdf_params=rec_data.new_kdf_params
     )
     
-    # Invalidate all current active sessions for security
     crud.delete_user_sessions(db, user.id)
-    
     crud.create_activity_log(db, user.id, "recovery_successful", ip, ua)
     
     return {"message": "Account credentials updated successfully. Please login with your new Master Password."}
@@ -533,28 +657,29 @@ async def change_password(
     current_user: models.User = Depends(get_current_user),
     db: DbSession = Depends(get_db)
 ):
-    # Verify the current verifier against current_user.verifier
     if not auth.verify_verifier(chg_data.current_verifier, current_user.verifier):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect current password"
         )
         
-    # Update security settings
-    new_hashed_verifier = auth.hash_verifier(chg_data.new_verifier)
+    stored_verifier = chg_data.new_verifier
+    if not chg_data.new_verifier.startswith("$2b$") and len(chg_data.new_verifier) < 60:
+        stored_verifier = auth.hash_verifier(chg_data.new_verifier)
     new_hashed_recovery = auth.hash_verifier(chg_data.new_recovery_codes_hash)
     
     crud.update_user_security(
         db=db,
         user_id=current_user.id,
         new_salt=chg_data.new_salt,
-        new_verifier=new_hashed_verifier,
+        new_verifier=stored_verifier,
         new_encrypted_vault=chg_data.new_encrypted_vault,
         new_encrypted_key_recovery=chg_data.new_encrypted_key_recovery,
-        new_recovery_hash=new_hashed_recovery
+        new_recovery_hash=new_hashed_recovery,
+        kdf_type="argon2id",
+        kdf_params=chg_data.new_kdf_params
     )
     
-    # Invalidate all user sessions on password change
     crud.delete_user_sessions(db, current_user.id)
     
     ip = get_client_ip(request)
@@ -579,5 +704,4 @@ async def delete_account(
             detail="Failed to delete account"
         )
         
-    # Log can't associate with user ID anymore, so we just return success
     return {"message": f"Account {email} has been successfully deleted"}

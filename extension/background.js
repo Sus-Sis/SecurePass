@@ -1,4 +1,87 @@
 let securepassTabId = null;
+const scannedUrlCache = new Map();
+
+// Helper: Scan URL against SecurePass AI Phishing Backend
+async function scanUrlWithAi(url) {
+  if (!url || !url.startsWith("http")) return { is_safe: true, prediction: "good" };
+  
+  // Ignore internal pages & SecurePass app itself
+  if (url.includes("localhost:5173") || url.includes("localhost:3000") || url.includes("securepass.com")) {
+    return { is_safe: true, prediction: "good" };
+  }
+
+  // Check cache first
+  if (scannedUrlCache.has(url)) {
+    return scannedUrlCache.get(url);
+  }
+
+  try {
+    const res = await fetch("http://localhost:8000/api/scan-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      scannedUrlCache.set(url, data);
+      return data;
+    }
+  } catch (err) {
+    console.warn("SecurePass AI Scan failed:", err);
+  }
+  return { is_safe: true, prediction: "good" };
+}
+
+// Automatically scan active tab URLs when user navigates
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab.url;
+  if (url && url.startsWith("http")) {
+
+    // Ignore internal pages, warning page itself, bypass links, & SecurePass web app tabs
+    if (url.includes("localhost:5173") || 
+        url.includes("localhost:3000") || 
+        url.includes("securepass.com") || 
+        url.includes("sp_bypass_phishing=true") || 
+        url.includes("warning.html")) {
+      return;
+    }
+
+    try {
+      const scanResult = await scanUrlWithAi(url);
+
+      if (scanResult && (!scanResult.is_safe || scanResult.prediction === "bad" || scanResult.prediction === "phishing")) {
+        console.warn("⚠️ SECUREPASS AI PHISHING DETECTED:", url, scanResult);
+
+        // 1. Show Native OS/Browser Notification
+        if (chrome.notifications) {
+          try {
+            chrome.notifications.create(`phishing-${tabId}-${Date.now()}`, {
+              type: "basic",
+              iconUrl: "icon.svg",
+              title: "🚨 SECUREPASS AI: PHISHING BLOCKED",
+              message: `Blocked dangerous phishing site: ${new URL(url).hostname}!`,
+              priority: 2
+            });
+          } catch (e) {}
+        }
+
+        // 2. Redirect tab directly to extension warning page!
+        const warningUrl = chrome.runtime.getURL("warning.html?url=" + encodeURIComponent(url));
+        chrome.tabs.update(tabId, { url: warningUrl }).catch(err => console.log("Tab update err:", err));
+
+        // 3. Log threat in SecurePass app if connected
+        if (securepassTabId) {
+          chrome.tabs.sendMessage(securepassTabId, {
+            type: "REQ_LOG_ACTION",
+            action: "ai_url_scanned_phishing"
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.log("URL scan error:", e);
+    }
+  }
+});
 
 // Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -10,6 +93,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("SecurePass Web Tab registered with ID:", securepassTabId);
     sendResponse({ success: true });
     return true;
+  }
+
+  // 1b. Content Script requests URL Phishing scan
+  if (message.type === "CHECK_URL_PHISHING") {
+    scanUrlWithAi(message.url).then(data => {
+      sendResponse({ result: data, isPhishing: !data.is_safe || data.prediction === "bad" });
+    });
+    return true; // async
   }
 
   // 2. Regular Content Script requests credentials for a domain

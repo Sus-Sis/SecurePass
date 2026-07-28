@@ -9,7 +9,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     salt = Column(Text, nullable=False)
-    verifier = Column(Text, nullable=False)
+    verifier = Column(Text, nullable=False)  # Stores SRP-6a verifier (v = g^x mod N) in hex
+    kdf_type = Column(String(50), default="argon2id")
+    kdf_params = Column(Text, nullable=True)  # JSON string of KDF parameters (time_cost, memory_cost, parallelism)
     encrypted_vault = Column(Text, default="[]")
     encrypted_key_recovery = Column(Text, nullable=True)
     mfa_secret = Column(Text, nullable=True)

@@ -1,3 +1,4 @@
+import json
 from sqlalchemy.orm import Session as DbSession
 from datetime import datetime, timedelta
 from typing import Optional
@@ -7,10 +8,13 @@ def get_user_by_email(db: DbSession, email: str) -> Optional[models.User]:
     return db.query(models.User).filter(models.User.email == email.lower()).first()
 
 def create_user(db: DbSession, user: schemas.UserRegister, hashed_verifier: str, hashed_recovery_code: str) -> models.User:
+    kdf_params_str = json.dumps(user.kdf_params) if user.kdf_params else None
     db_user = models.User(
         email=user.email.lower(),
         salt=user.salt,
         verifier=hashed_verifier,
+        kdf_type=user.kdf_type or "argon2id",
+        kdf_params=kdf_params_str,
         encrypted_vault=user.encrypted_vault,
         encrypted_key_recovery=user.encrypted_key_recovery,
         recovery_codes_hash=hashed_recovery_code,
@@ -28,11 +32,14 @@ def update_user_vault(db: DbSession, user_id: int, encrypted_vault: str) -> mode
         db.refresh(db_user)
     return db_user
 
-def update_user_security(db: DbSession, user_id: int, new_salt: str, new_verifier: str, new_encrypted_vault: str, new_encrypted_key_recovery: str, new_recovery_hash: str) -> models.User:
+def update_user_security(db: DbSession, user_id: int, new_salt: str, new_verifier: str, new_encrypted_vault: str, new_encrypted_key_recovery: str, new_recovery_hash: str, kdf_type: str = "argon2id", kdf_params: Optional[dict] = None) -> models.User:
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if db_user:
         db_user.salt = new_salt
         db_user.verifier = new_verifier
+        db_user.kdf_type = kdf_type
+        if kdf_params:
+            db_user.kdf_params = json.dumps(kdf_params)
         db_user.encrypted_vault = new_encrypted_vault
         db_user.encrypted_key_recovery = new_encrypted_key_recovery
         db_user.recovery_codes_hash = new_recovery_hash
@@ -62,7 +69,6 @@ def update_mfa_secret(db: DbSession, user_id: int, secret: Optional[str], enable
 def increment_failed_attempts(db: DbSession, user: models.User) -> models.User:
     user.failed_attempts += 1
     if user.failed_attempts >= 10:
-        # Lock account for 15 minutes
         user.locked_until = datetime.utcnow() + timedelta(minutes=15)
     db.commit()
     db.refresh(user)

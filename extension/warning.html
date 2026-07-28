@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phishing Site Blocked - SecurePass AI Shield</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #151c2e;
+      --border: rgba(239, 68, 68, 0.4);
+      --red: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .warning-container {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-top: 6px solid var(--red);
+      border-radius: 16px;
+      max-width: 640px;
+      width: 100%;
+      padding: 2.5rem;
+      box-shadow: 0 25px 50px -12px rgba(239, 68, 68, 0.25), 0 0 30px rgba(0,0,0,0.5);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      margin-bottom: 1.75rem;
+    }
+    .icon-box {
+      width: 64px;
+      height: 64px;
+      border-radius: 12px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2rem;
+      flex-shrink: 0;
+    }
+    .title-group h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #f87171;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      margin-top: 0.25rem;
+    }
+    .info-box {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1.75rem;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.4rem 0;
+      font-size: 0.9rem;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+    }
+    .info-row:last-child { border-bottom: none; }
+    .label { color: var(--text-muted); font-size: 0.82rem; }
+    .val { font-weight: 600; color: #ffffff; word-break: break-all; }
+    .description {
+      font-size: 0.92rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+    .actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 0.85rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      flex: 1;
+      min-width: 180px;
+    }
+    .btn-primary {
+      background: #ef4444;
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+    }
+    .btn-primary:hover {
+      background: #dc2626;
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .btn-secondary:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+  <div class="warning-container">
+    <div class="header">
+      <div class="icon-box">🚨</div>
+      <div class="title-group">
+        <h1>Phishing Site Blocked</h1>
+        <span class="badge">TF-IDF + Linear SVM Model Active</span>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <div class="info-row">
+        <span class="label">Target Website URL:</span>
+        <span id="target-url" class="val">https://example.com</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Security Verdict:</span>
+        <span class="val" style="color: #f87171;">High Risk Phishing Threat</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Protection Module:</span>
+        <span class="val">SecurePass AI Real-Time Shield</span>
+      </div>
+    </div>
+
+    <p class="description">
+      SecurePass AI has automatically intercepted and blocked this website. This URL matches malicious phishing patterns designed to trick you into entering credentials or sensitive passwords.
+    </p>
+
+    <div class="actions">
+      <button id="btn-back-safety" class="btn btn-primary">
+        🛡️ Back to Safety (Vault)
+      </button>
+      <button id="btn-proceed-unsafe" class="btn btn-secondary">
+        Proceed Anyway (Unsafe)
+      </button>
+    </div>
+  </div>
+
+  <script src="warning.js"></script>
+</body>
+</html>

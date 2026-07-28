@@ -340,4 +340,121 @@ if (isSecurePassTab) {
       }, 200);
     }
   }
+
+  // ==========================================
+  // AUTOMATIC AI PHISHING PROTECTION
+  // ==========================================
+  chrome.runtime.sendMessage({ type: "CHECK_URL_PHISHING", url: window.location.href }, (res) => {
+    if (res && res.isPhishing) {
+      showPhishingWarningOverlay(res.result, window.location.href);
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "PHISHING_WARNING") {
+      showPhishingWarningOverlay(message.result, message.url);
+    }
+  });
+
+  function showPhishingWarningOverlay(result, url) {
+    if (document.getElementById("securepass-phishing-warning-toast")) return;
+
+    const overlay = document.createElement("div");
+    overlay.id = "securepass-phishing-warning-toast";
+    overlay.style.cssText = `
+      position: fixed !important;
+      top: 24px !important;
+      right: 24px !important;
+      width: 380px !important;
+      max-width: calc(100vw - 48px) !important;
+      z-index: 2147483647 !important;
+      background: #0f172a !important;
+      border: 1px solid rgba(239, 68, 68, 0.5) !important;
+      border-left: 5px solid #ef4444 !important;
+      border-radius: 12px !important;
+      color: #f8fafc !important;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      padding: 1.25rem !important;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(239, 68, 68, 0.2) !important;
+      box-sizing: border-box !important;
+      animation: spSideToastSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    `;
+
+    const cleanDomain = url ? new URL(url).hostname : window.location.hostname;
+
+    overlay.innerHTML = `
+      <style>
+        @keyframes spSideToastSlide {
+          from { transform: translateX(120%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        .sp-side-btn-safe {
+          background: #ef4444 !important;
+          color: #ffffff !important;
+          border: none !important;
+          padding: 0.55rem 1rem !important;
+          border-radius: 6px !important;
+          font-weight: 700 !important;
+          font-size: 0.82rem !important;
+          cursor: pointer !important;
+          flex: 1 !important;
+          text-align: center !important;
+          box-shadow: 0 4px 12px rgba(239,68,68,0.4) !important;
+        }
+        .sp-side-btn-safe:hover {
+          background: #dc2626 !important;
+        }
+        .sp-side-btn-ignore {
+          background: rgba(255,255,255,0.08) !important;
+          color: #94a3b8 !important;
+          border: 1px solid rgba(255,255,255,0.15) !important;
+          padding: 0.55rem 0.85rem !important;
+          border-radius: 6px !important;
+          font-weight: 500 !important;
+          font-size: 0.82rem !important;
+          cursor: pointer !important;
+        }
+        .sp-side-btn-ignore:hover {
+          color: #ffffff !important;
+          background: rgba(255,255,255,0.18) !important;
+        }
+      </style>
+      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+        <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+          <div style="font-size: 1.8rem; background: rgba(239,68,68,0.15); padding: 0.4rem; border-radius: 8px; flex-shrink: 0; line-height: 1;">🚨</div>
+          <div style="flex: 1;">
+            <div style="font-size: 0.95rem; font-weight: 800; color: #f87171; text-transform: uppercase; letter-spacing: 0.04em; display: flex; align-items: center; justify-content: space-between;">
+              <span>Phishing Warning</span>
+              <span style="font-size: 0.65rem; font-weight: 600; background: rgba(239,68,68,0.2); color: #fca5a5; padding: 0.1rem 0.4rem; border-radius: 4px;">AI Active</span>
+            </div>
+            <p style="margin: 0.4rem 0 0 0; font-size: 0.83rem; color: #cbd5e1; line-height: 1.45;">
+              <strong>${cleanDomain}</strong> is flagged as a dangerous phishing attempt by SecurePass AI (Linear SVM).
+            </p>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+          <button id="sp-btn-phishing-safety" class="sp-side-btn-safe">
+            🛡️ Leave Site
+          </button>
+          <button id="sp-btn-phishing-ignore" class="sp-side-btn-ignore">
+            Dismiss
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("sp-btn-phishing-safety").onclick = () => {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.href = "http://localhost:5173/vault";
+      }
+    };
+
+    document.getElementById("sp-btn-phishing-ignore").onclick = () => {
+      overlay.remove();
+    };
+  }
 }

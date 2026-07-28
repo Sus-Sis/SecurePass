@@ -33,19 +33,22 @@ export default function Login() {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
-  const [recoveryStep, setRecoveryStep] = useState(1); // 1: initiate, 2: decrypt & set password
-  const [recoveryPayload, setRecoveryPayload] = useState(null); // { salt, encrypted_key_recovery, encrypted_vault }
+  const [recoveryStep, setRecoveryStep] = useState(1);
+  const [recoveryPayload, setRecoveryPayload] = useState(null);
   const [newRecoveryCode, setNewRecoveryCode] = useState("");
 
-  // Determine redirection
-  const from = location.state?.from?.pathname || "/vault";
+  // Determine redirection target (always fallback to /vault)
+  let targetPath = location.state?.from?.pathname || "/vault";
+  if (targetPath === "/login" || targetPath === "/register" || targetPath === "/") {
+    targetPath = "/vault";
+  }
 
   // Redirect if already logged in and unlocked
   useEffect(() => {
     if (token && !isLocked) {
-      navigate(from, { replace: true });
+      navigate("/vault", { replace: true });
     }
-  }, [token, isLocked, navigate, from]);
+  }, [token, isLocked, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -56,14 +59,14 @@ export default function Login() {
       if (token && isLocked) {
         // Unlock mode
         await unlock(password);
-        navigate(from, { replace: true });
+        navigate("/vault", { replace: true });
       } else {
         // Login mode
         const result = await login(email, password, mfaRequired ? mfaCode : null);
-        if (result.mfaRequired) {
+        if (result && result.mfaRequired) {
           setMfaRequired(true);
-        } else if (result.success) {
-          navigate(from, { replace: true });
+        } else if (result && result.success) {
+          navigate("/vault", { replace: true });
         }
       }
     } catch (err) {
@@ -73,7 +76,6 @@ export default function Login() {
     }
   };
 
-  // ZK Recovery Flow - Step 1: Fetch recovery payload
   const handleInitiateRecovery = async (e) => {
     e.preventDefault();
     setError("");
@@ -97,7 +99,6 @@ export default function Login() {
     }
   };
 
-  // ZK Recovery Flow - Step 2: Decrypt old vault, encrypt with new credentials
   const handleVerifyRecovery = async (e) => {
     e.preventDefault();
     setError("");
@@ -116,38 +117,32 @@ export default function Login() {
     }
 
     try {
-      // 1. Decrypt Master Key (MK) using Recovery Code inputted by user
       const cleanRecoveryCode = recoveryCode.trim();
       const oldMK = await decryptMasterKeyWithRecoveryCode(
         recoveryPayload.encrypted_key_recovery, 
         cleanRecoveryCode
       );
 
-      // 2. Decrypt old vault using the decrypted old master key
       const decryptedVaultArray = await decryptVault(
         recoveryPayload.encrypted_vault, 
         oldMK
       );
 
-      // 3. Derive new Master Key (MK') using new password and new salt
-      const newSalt = generateRecoveryCode(); // generate random salt hex (32 bytes hex = 64 chars)
+      const newSalt = generateRecoveryCode();
       const newMK = await deriveMasterKey(newPassword, newSalt);
       const newVerifier = await computeAuthVerifier(newMK);
 
-      // 4. Encrypt decrypted vault with new master key
       const newEncryptedVault = await encryptVault(decryptedVaultArray, newMK);
 
-      // 5. Encrypt new master key with a newly generated recovery code
       const generatedCode = generateRecoveryCode();
       const newEncryptedMKRecovery = await encryptMasterKeyWithRecoveryCode(newMK, generatedCode);
       const newRecoveryHash = await computeAuthVerifier(await deriveMasterKey(generatedCode, newSalt));
 
-      // 6. Send recovery details to backend
       const hashedRecoverySent = await computeAuthVerifier(await deriveMasterKey(cleanRecoveryCode, recoveryPayload.salt));
       
       await api.verifyRecovery({
         email: recoveryEmail,
-        recovery_code: hashedRecoverySent, // Hash it so server checks against bcrypt hash
+        recovery_code: hashedRecoverySent,
         new_verifier: newVerifier,
         new_salt: newSalt,
         new_encrypted_vault: newEncryptedVault,
@@ -194,7 +189,6 @@ export default function Login() {
     setError("");
   };
 
-  // Render Lock Mode
   if (token && isLocked) {
     return (
       <div className="auth-wrapper">
@@ -272,7 +266,6 @@ export default function Login() {
     );
   }
 
-  // Render Recovery Mode
   if (isRecoveryMode) {
     return (
       <div className="auth-wrapper">
@@ -420,7 +413,6 @@ export default function Login() {
     );
   }
 
-  // Render Standard Login Mode
   return (
     <div className="auth-wrapper">
       <div className="card auth-card">

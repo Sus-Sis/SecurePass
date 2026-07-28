@@ -7,21 +7,26 @@ SecurePass is a production-ready, zero-knowledge password manager designed to se
 ## Security Architecture
 
 ### 1. Zero-Knowledge Cryptography
-ALL encryption and decryption happen strictly on the client side (in-browser or inside the extension) using the native **Web Crypto API**. The server never receives, stores, or processes:
+ALL encryption and decryption happen strictly on the client side (in-browser or inside the extension) using the native **Web Crypto API** and **WebAssembly/JS Argon2id**. The server never receives, stores, or processes:
 - Plaintext passwords or credentials
 - The user's Master Password
 - The Master Key used to encrypt vault data
+- Static password hashes over the wire
 
 The server stores only:
 1. An encrypted vault payload (ciphertext).
 2. The user's public KDF salt.
-3. An auth verifier hash (to verify logins).
-4. An encrypted key recovery payload.
+3. User-calibrated Argon2id KDF parameters (`memoryCost`, `timeCost`, `parallelism`).
+4. An SRP-6a verifier $v = g^x \bmod N$ (used for zero-knowledge challenge-response authentication).
+5. An encrypted key recovery payload.
 
 ### 2. Encryption & Key Derivation Specifications
-- **Master Key Derivation**: Derived from the Master Password and a unique 64-byte random client salt using `PBKDF2` with `HMAC-SHA-256` and **600,000 iterations**.
-- **Auth Verifier**: Derived as the SHA-256 hash of the derived Master Key: `verifier = SHA-256(MasterKey)`. The client sends this verifier to the server.
-- **Server Hashing**: The server hashes the incoming Auth Verifier again using `bcrypt` before writing it to the database.
+- **Master Key Derivation**: Derived using **Argon2id (RFC 9106)** with client-side **adaptive benchmarking**. At registration, the client benchmarks its device performance to select optimal parameters (`memory_cost`, `time_cost`, `parallelism`) targeting ~300ms latency. Supports PBKDF2 as a legacy fallback.
+- **Zero-Knowledge Authentication (SRP-6a / PAKE Protocol)**: 
+  - Login uses **SRP-6a** (Secure Remote Password - RFC 5054).
+  - Client and server run a 2-step challenge-response handshake ($A = g^a \bmod N$, $B = k \cdot v + g^b \bmod N$).
+  - Neither password nor static master key verifier is ever transmitted over the wire.
+  - Every login produces a unique non-replayable proof ($M_1$ from client, $M_2$ from server).
 - **Vault Encryption**: Vault data (a JSON array of credentials) is encrypted using **AES-256-GCM**. A cryptographically secure random 12-byte IV is generated for every encryption operation using `window.crypto.getRandomValues()`.
 
 ### 3. Zero-Knowledge Account Recovery Protocol
@@ -29,14 +34,14 @@ If a user forgets their master password, they can recover their decrypted vault 
 1. **Setup (Registration)**: A 32-byte cryptographically secure random Recovery Code is generated for the user.
    - Client derives a Recovery Master Key (RMK) = `SHA-256(Recovery Code)`.
    - Client encrypts the Master Key (MK) using RMK via AES-GCM to produce `encrypted_key_recovery`.
-   - Client hashes the Recovery Code using `SHA-256` and sends the verifier to the server as `recovery_codes_hash` (stored using `bcrypt`).
+   - Client generates an SRP verifier for the recovery code.
 2. **Execution (Recovery)**:
    - User inputs their Recovery Code.
    - Client requests the encrypted recovery payload and vault from the server (`/api/auth/recovery/initiate`).
    - Client derives RMK, decrypts `encrypted_key_recovery` to retrieve the Master Key (MK).
    - Client decrypts the old `encrypted_vault` using MK.
    - User sets a new Master Password.
-   - Client derives a new MK', re-encrypts the vault, generates a new verifier, encrypts MK' with a new recovery code, and sends updates to the server (`/api/auth/recovery/verify`).
+   - Client derives a new MK' via Argon2id, re-encrypts the vault, generates a new SRP verifier, encrypts MK' with a new recovery code, and sends updates to the server (`/api/auth/recovery/verify`).
 
 ---
 
@@ -47,25 +52,27 @@ SecurePass/
 ├── backend/
 │   ├── app/
 │   │   ├── database.py       # DB Connection & Sessions
-│   │   ├── models.py         # SQLAlchemy Database Schema
-│   │   ├── schemas.py        # Pydantic schemas (Data Validation)
+│   │   ├── models.py         # SQLAlchemy Database Schema (Argon2 params & SRP verifier)
+│   │   ├── schemas.py        # Pydantic schemas (Data Validation & SRP models)
 │   │   ├── crud.py           # SQL query helpers
-│   │   ├── auth.py           # JWT, Bcrypt, PyOTP, QR generation
-│   │   └── main.py           # FastAPI Endpoints & App initialization
+│   │   ├── auth.py           # JWT, SRP-6a PAKE cryptography, PyOTP, QR generation
+│   │   └── main.py           # FastAPI Endpoints (SRP challenge & authenticate routes)
 │   ├── requirements.txt      # Python dependencies
 │   ├── Dockerfile            # Container definition
 │   └── test_security.py      # Automated security assurance test suite
 ├── frontend/
 │   ├── src/
 │   │   ├── context/
-│   │   │   └── AuthContext.jsx # Global Auth state & key storage
+│   │   │   └── AuthContext.jsx # Global Auth state & zero-knowledge login flow
 │   │   ├── pages/
-│   │   │   ├── Register.jsx  # Strength calculations & Recovery DL
-│   │   │   ├── Login.jsx     # MFA checks & ZK Account Recovery
+│   │   │   ├── Register.jsx  # Strength calculations, Argon2 benchmark & Recovery DL
+│   │   │   ├── Login.jsx     # SRP-6a authentication & ZK Account Recovery
 │   │   │   ├── Dashboard.jsx # Vault CRUD, Clipboard, Pass Generator
 │   │   │   └── Settings.jsx  # Password reset, MFA, JSON export, Logs
 │   │   ├── utils/
-│   │   │   ├── crypto.js     # Web Crypto API wrapper (AES-GCM/PBKDF2)
+│   │   │   ├── argon2.js     # Argon2id KDF & adaptive benchmarking module
+│   │   │   ├── srp.js        # SRP-6a client-side challenge & proof calculation
+│   │   │   ├── crypto.js     # Web Crypto API wrapper (AES-GCM / Argon2 / SRP)
 │   │   │   └── api.js        # API connection service
 │   │   ├── App.jsx           # Routing & nav logic
 │   │   ├── main.jsx          # Entry point
@@ -169,7 +176,7 @@ This starts:
 ---
 
 ## Running Automated Security Tests
-We have built an automated test suite verifying all critical security conditions (Lockout, Rate Limiting, Registration, Login, Token invalidation). 
+We have built an automated test suite verifying all critical security conditions (Argon2id parameters, SRP-6a zero-knowledge handshake, Lockout, Rate Limiting, Registration, Login, Token invalidation). 
 
 To execute the tests:
 1. Ensure the virtual environment is active:

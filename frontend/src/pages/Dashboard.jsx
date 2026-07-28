@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [showAddEditModal, setShowAddEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [showGenModal, setShowGenModal] = useState(false);
+  const [showHealthModal, setShowHealthModal] = useState(false);
   
   // Form States
   const [title, setTitle] = useState("");
@@ -240,7 +241,139 @@ export default function Dashboard() {
     return { label: `Valid until ${expDateStr}`, color: "#10B981", bg: "rgba(16,185,129,0.15)" };
   };
 
+  // Real Vault Health Audit Calculation
+  const calculateVaultHealth = (items) => {
+    if (!items || items.length === 0) {
+      return {
+        score: 100,
+        label: "100% Excellent",
+        statusText: "Excellent",
+        color: "#10B981",
+        totalItems: 0,
+        weakCount: 0,
+        moderateCount: 0,
+        strongCount: 0,
+        reusedCount: 0,
+        expiredCount: 0,
+        expiringCount: 0,
+        noUrlCount: 0,
+        issues: []
+      };
+    }
+
+    // 1. Password reuse mapping
+    const passwordCounts = {};
+    items.forEach(item => {
+      if (item.password) {
+        passwordCounts[item.password] = (passwordCounts[item.password] || 0) + 1;
+      }
+    });
+
+    let totalItemScores = 0;
+    let weakCount = 0;
+    let moderateCount = 0;
+    let strongCount = 0;
+    let reusedCount = 0;
+    let expiredCount = 0;
+    let expiringCount = 0;
+    let noUrlCount = 0;
+    const issues = [];
+
+    items.forEach(item => {
+      let itemScore = 100;
+      const itemName = item.title || item.name || "Vault Item";
+
+      // A. Password Analysis (for Logins or items containing passwords)
+      if (item.category === "Logins" || item.password) {
+        const pw = item.password || "";
+        const entropy = calculateEntropy(pw);
+
+        if (!pw) {
+          itemScore -= 50;
+          weakCount++;
+          issues.push({ type: "danger", title: itemName, text: "No password specified." });
+        } else if (entropy.strength === "Weak") {
+          itemScore -= 40;
+          weakCount++;
+          issues.push({ type: "danger", title: itemName, text: `Weak password strength (${entropy.bits} bits).` });
+        } else if (entropy.strength === "Moderate") {
+          itemScore -= 15;
+          moderateCount++;
+          issues.push({ type: "warning", title: itemName, text: `Moderate password strength (${entropy.bits} bits).` });
+        } else {
+          strongCount++;
+        }
+
+        // Check password reuse
+        if (pw && passwordCounts[pw] > 1) {
+          itemScore -= 25;
+          reusedCount++;
+          issues.push({ type: "warning", title: itemName, text: "Password is reused across multiple vault items." });
+        }
+
+        // Check site URL presence
+        if (!item.url && item.category === "Logins") {
+          itemScore -= 10;
+          noUrlCount++;
+          issues.push({ type: "info", title: itemName, text: "Missing website URL (limits AI phishing detection)." });
+        }
+      }
+
+      // B. Expiration Audit for Certificates / Documents
+      if (item.expiry_date) {
+        const exp = new Date(item.expiry_date);
+        const now = new Date();
+        const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+
+        if (diffDays < 0) {
+          itemScore -= 50;
+          expiredCount++;
+          issues.push({ type: "danger", title: itemName, text: `Credential expired on ${item.expiry_date}.` });
+        } else if (diffDays <= 30) {
+          itemScore -= 25;
+          expiringCount++;
+          issues.push({ type: "warning", title: itemName, text: `Credential expires soon (${diffDays} days left).` });
+        }
+      }
+
+      totalItemScores += Math.max(0, Math.min(100, itemScore));
+    });
+
+    const finalScore = Math.max(0, Math.min(100, Math.round(totalItemScores / items.length)));
+
+    let statusText = "Excellent";
+    let color = "#10B981";
+
+    if (finalScore < 50) {
+      statusText = "At Risk";
+      color = "#EF4444";
+    } else if (finalScore < 75) {
+      statusText = "Fair";
+      color = "#F59E0B";
+    } else if (finalScore < 90) {
+      statusText = "Good";
+      color = "#06B6D4";
+    }
+
+    return {
+      score: finalScore,
+      label: `${finalScore}% ${statusText}`,
+      statusText,
+      color,
+      totalItems: items.length,
+      weakCount,
+      moderateCount,
+      strongCount,
+      reusedCount,
+      expiredCount,
+      expiringCount,
+      noUrlCount,
+      issues
+    };
+  };
+
   // Stats Calculations
+  const vaultHealth = calculateVaultHealth(decryptedVault);
   const totalItems = (decryptedVault || []).length;
   const certsCount = (decryptedVault || []).filter(x => x.category === "Certificates").length;
   const docsCount = (decryptedVault || []).filter(x => x.category === "Documents" || x.category === "Cards").length;
@@ -315,61 +448,20 @@ export default function Dashboard() {
       {/* Main Content Area */}
       <main className="main-content">
         
-        {/* Security & Health Stats Header */}
-        <div className="dashboard-header-stats">
-          <div className="stat-card">
-            <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10B981' }}>🛡️</div>
-            <div className="stat-info">
-              <span className="stat-label">Vault Health</span>
-              <span className="stat-value" style={{ color: '#10B981' }}>98% Excellent</span>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06B6D4' }}>🎓</div>
-            <div className="stat-info">
-              <span className="stat-label">Certificates & IDs</span>
-              <span className="stat-value">{certsCount + docsCount} Saved</span>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#8B5CF6' }}>🤖</div>
-            <div className="stat-info">
-              <span className="stat-label">AI Threat Model</span>
-              <span className="stat-value" style={{ fontSize: '1.1rem' }}>Linear SVM Active</span>
-            </div>
-          </div>
-        </div>
 
-        {/* AI Phishing Scanner Widget */}
-        <div className="ai-scanner-box">
-          <div className="ai-scanner-header">
-            <span className="ai-scanner-title">
-              🤖 AI Phishing Scanner 
-              <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                TF-IDF + Linear SVM Model
+        {/* AI Real-Time Extension Phishing Protection Status */}
+        <div className="ai-scanner-box" style={{ background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9))', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '1.25rem 1.5rem' }}>
+          <div className="ai-scanner-header" style={{ marginBottom: '0.4rem' }}>
+            <span className="ai-scanner-title" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '1.1rem' }}>
+              🤖 AI Phishing Protection Shield
+              <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#10B981', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '20px' }}>
+                ⚡ Browser Extension Active
               </span>
             </span>
           </div>
-          <form onSubmit={handleRunAiScan} className="ai-scanner-input-group">
-            <input 
-              type="text" 
-              className="form-input"
-              placeholder="Paste any website URL or verification link to test against AI Phishing model..."
-              value={scanUrlInput}
-              onChange={(e) => setScanUrlInput(e.target.value)}
-            />
-            <button type="submit" className="ai-scan-btn" disabled={scanning}>
-              {scanning ? "Scanning..." : "Scan with AI"}
-            </button>
-          </form>
-
-          {scanResult && (
-            <div className={`ai-scan-result ${scanResult.is_safe ? "ai-result-safe" : "ai-result-danger"}`}>
-              <span>{scanResult.is_safe ? "✅ SAFE WEBSITE:" : "⚠️ PHISHING RISK DETECTED:"}</span>
-              <span><strong>{scanResult.url}</strong></span>
-              <span style={{ marginLeft: 'auto' }}>Verdict: <strong>{scanResult.risk_level}</strong></span>
-            </div>
-          )}
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Automated real-time protection powered by <strong>TF-IDF + Linear SVM Model</strong>. The SecurePass Browser Extension continuously monitors website URLs in your browser tabs and instantly displays a side security warning if a phishing site is detected.
+          </p>
         </div>
 
         {/* Actions Bar */}
@@ -901,6 +993,143 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Vault Security Health Audit Modal */}
+      {showHealthModal && (
+        <div className="modal-overlay" onClick={() => setShowHealthModal(false)}>
+          <div className="modal-content health-audit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ background: `${vaultHealth.color}20`, color: vaultHealth.color, padding: '0.5rem', borderRadius: '8px', fontSize: '1.4rem' }}>
+                  🛡️
+                </div>
+                <div>
+                  <h2 className="modal-title" style={{ margin: 0, fontSize: '1.25rem' }}>Vault Security Health Audit</h2>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    Real-time analysis based on password entropy, reuse, site coverage & document expiration
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowHealthModal(false)} className="btn-icon">
+                <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Overall Health Score Card */}
+              <div style={{ 
+                background: 'rgba(255,255,255,0.02)', 
+                border: `1px solid ${vaultHealth.color}40`, 
+                borderRadius: '12px', 
+                padding: '1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem'
+              }}>
+                <div>
+                  <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    Overall Health Score
+                  </span>
+                  <div style={{ fontSize: '2rem', fontWeight: 800, color: vaultHealth.color, display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                    {vaultHealth.score}% 
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600, padding: '0.2rem 0.6rem', borderRadius: '20px', background: `${vaultHealth.color}20`, color: vaultHealth.color }}>
+                      {vaultHealth.statusText}
+                    </span>
+                  </div>
+                </div>
+                
+                <div style={{ flex: 1, maxWidth: '200px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                    <span>Security Rating</span>
+                    <span>{vaultHealth.score} / 100</span>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: `${vaultHealth.score}%`, height: '100%', background: vaultHealth.color, transition: 'width 0.4s ease' }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Health Metrics Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
+                <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.2rem', marginBottom: '0.2rem' }}>🔑</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: vaultHealth.strongCount > 0 ? '#10B981' : 'var(--text-primary)' }}>{vaultHealth.strongCount}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Strong Passwords</div>
+                </div>
+                <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.2rem', marginBottom: '0.2rem' }}>⚠️</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: vaultHealth.reusedCount > 0 ? '#F59E0B' : '#10B981' }}>{vaultHealth.reusedCount}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Reused Passwords</div>
+                </div>
+                <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.2rem', marginBottom: '0.2rem' }}>❌</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: vaultHealth.weakCount > 0 ? '#EF4444' : '#10B981' }}>{vaultHealth.weakCount}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Weak Passwords</div>
+                </div>
+                <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.2rem', marginBottom: '0.2rem' }}>📅</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: (vaultHealth.expiredCount + vaultHealth.expiringCount) > 0 ? '#F59E0B' : '#10B981' }}>
+                    {vaultHealth.expiredCount + vaultHealth.expiringCount}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Expiring / Expired</div>
+                </div>
+              </div>
+
+              {/* Security Audit Findings */}
+              <div>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  🔍 Security Audit Findings ({vaultHealth.issues.length})
+                </h3>
+                {vaultHealth.issues.length === 0 ? (
+                  <div style={{ 
+                    padding: '1rem', 
+                    borderRadius: '8px', 
+                    background: 'rgba(16, 185, 129, 0.1)', 
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    color: '#10B981',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <span>✅</span>
+                    <span>No security issues or vulnerabilities detected. Your vault is in peak health!</span>
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.25rem' }}>
+                    {vaultHealth.issues.map((issue, idx) => (
+                      <div key={idx} style={{ 
+                        display: 'flex', 
+                        alignItems: 'flex-start', 
+                        gap: '0.6rem', 
+                        padding: '0.65rem 0.85rem', 
+                        borderRadius: '6px', 
+                        background: 'rgba(255,255,255,0.03)',
+                        borderLeft: `3px solid ${issue.type === 'danger' ? '#EF4444' : issue.type === 'warning' ? '#F59E0B' : '#06B6D4'}`,
+                        fontSize: '0.82rem'
+                      }}>
+                        <span style={{ fontSize: '1rem' }}>{issue.type === 'danger' ? '🔴' : issue.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ color: 'var(--text-primary)' }}>{issue.title}</strong>: <span style={{ color: 'var(--text-secondary)' }}>{issue.text}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button onClick={() => setShowHealthModal(false)} className="btn btn-primary" style={{ width: '100%' }}>
+                Close Security Audit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
 
       {/* Global Toast confirmation */}
       {toastMessage && (
