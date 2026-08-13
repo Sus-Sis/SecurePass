@@ -10,32 +10,78 @@ import Settings from "./pages/Settings";
 function Navigation() {
   const { token, isLocked, logout, lock, user } = useAuth();
   const location = useLocation();
+  const [currentTheme, setCurrentTheme] = React.useState(localStorage.getItem("securepass_theme") || "obsidian");
 
-  if (!token || isLocked) return null; // Hide navigation on login/register/unlock screens
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem("securepass_theme");
+    if (savedTheme && savedTheme !== "obsidian") {
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    }
+  }, []);
+
+  const changeTheme = (e) => {
+    const theme = e.target.value;
+    setCurrentTheme(theme);
+    localStorage.setItem("securepass_theme", theme);
+    if (theme === "obsidian") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+  };
+
+  if (!token || isLocked) return null;
 
   return (
-    <nav className="navbar">
-      <div className="nav-brand">
-        <span>🛡️ SecurePass</span>
+    <nav className="navbar" style={{ padding: '0.85rem 1.75rem', background: 'rgba(9, 13, 22, 0.85)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+      <div className="nav-brand" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', boxShadow: '0 0 15px rgba(6, 182, 212, 0.4)' }}>
+          🛡️
+        </div>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.2rem', letterSpacing: '-0.02em', background: 'linear-gradient(135deg, #ffffff, #94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          SecurePass
+        </span>
+        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '12px' }}>
+          Zero-Knowledge
+        </span>
       </div>
-      <div className="nav-links">
+      
+      <div className="nav-links" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
         <Link 
           to="/vault" 
           className={`nav-link ${location.pathname === "/vault" ? "active" : ""}`}
+          style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.88rem', fontWeight: 600 }}
         >
-          Vault
+          🔐 Vault Workspace
         </Link>
         <Link 
           to="/settings" 
           className={`nav-link ${location.pathname === "/settings" ? "active" : ""}`}
+          style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.88rem', fontWeight: 600 }}
         >
-          Settings
+          ⚙️ Settings
         </Link>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginLeft: '0.5rem' }}>
-          ({user?.email})
-        </span>
-        <button onClick={lock} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
-          Lock Vault
+
+        {/* Theme Picker Dropdown */}
+        <select 
+          value={currentTheme}
+          onChange={changeTheme}
+          style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.12)', color: '#f1f5f9', padding: '0.35rem 0.65rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
+          title="Change Color Theme"
+        >
+          <option value="obsidian">🎨 Obsidian Cyan</option>
+          <option value="emerald">🌿 Dark Emerald</option>
+          <option value="amethyst">🔮 Amethyst Violet</option>
+          <option value="titanium">⚡ Titanium Blue</option>
+        </select>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(30, 41, 59, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', padding: '0.3rem 0.75rem', borderRadius: '20px', fontSize: '0.78rem', color: '#cbd5e1' }}>
+          <span>👤</span>
+          <span>{user?.email}</span>
+        </div>
+
+        <button onClick={lock} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          🔒 Lock Vault
         </button>
         <button onClick={logout} className="btn btn-danger" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
           Log Out

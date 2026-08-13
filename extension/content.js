@@ -63,6 +63,7 @@ if (isSecurePassTab) {
       chrome.runtime.sendMessage({
         type: "RELAY_CREDENTIALS",
         credentials: event.data.data,
+        allLogins: event.data.allLogins,
         requesterTabId: event.data.requesterTabId
       });
     }
@@ -81,11 +82,14 @@ if (isSecurePassTab) {
   // THIRD PARTY WEBSITE LOGIC
   // ==========================================
   
-  // Run on load
+  // Run on load immediately
+  chrome.runtime.sendMessage({ type: "GET_CREDENTIALS", domain: currentDomain });
+  createFloatingVaultTrigger();
+
   setTimeout(() => {
     detectAndSetupForms();
     checkForPendingSave();
-  }, 1000);
+  }, 500);
 
   // Monitor dynamic DOM insertions to catch Javascript dynamic login forms
   const observer = new MutationObserver(() => {
@@ -95,33 +99,86 @@ if (isSecurePassTab) {
 
   let autofillData = null;
 
-  function detectAndSetupForms() {
-    const passwordInputs = document.querySelectorAll("input[type='password']");
-    if (passwordInputs.length === 0) return;
+  function createFloatingVaultTrigger() {
+    if (document.getElementById("securepass-floating-trigger")) return;
 
-    passwordInputs.forEach(passInput => {
-      // Avoid double binding
-      if (passInput.dataset.securepassBound) return;
-      passInput.dataset.securepassBound = "true";
+    const btn = document.createElement("button");
+    btn.id = "securepass-floating-trigger";
+    btn.innerHTML = `🛡️ <span id="sp-trig-text">SecurePass</span>`;
 
-      const form = passInput.closest("form");
-      const usernameInput = findUsernameField(passInput, form);
+    const style = document.createElement("style");
+    style.id = "securepass-floating-trigger-styles";
+    style.textContent = `
+      #securepass-floating-trigger {
+        position: fixed !important;
+        top: 100px !important;
+        right: 0 !important;
+        z-index: 2147483646 !important;
+        background: linear-gradient(135deg, #0f172a, #1e293b) !important;
+        color: #06b6d4 !important;
+        border: 1px solid rgba(6, 182, 212, 0.4) !important;
+        border-right: none !important;
+        border-radius: 20px 0 0 20px !important;
+        padding: 8px 12px 8px 10px !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        cursor: pointer !important;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5), 0 0 10px rgba(6, 182, 212, 0.2) !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        transition: transform 0.2s ease, background 0.2s ease !important;
+      }
+      #securepass-floating-trigger:hover {
+        transform: translateX(-4px) !important;
+        background: linear-gradient(135deg, #06b6d4, #3b82f6) !important;
+        color: #ffffff !important;
+      }
+    `;
 
-      // Check if credentials exist for this domain
-      chrome.runtime.sendMessage({ 
-        type: "GET_CREDENTIALS", 
-        domain: currentDomain 
-      });
+    document.head.appendChild(style);
+    document.body.appendChild(btn);
 
-      // Bind submit listener
-      if (form) {
-        form.addEventListener("submit", (e) => {
-          captureCredentials(usernameInput, passInput);
-        });
+    btn.onclick = () => {
+      if (document.getElementById("securepass-extension-vault-popup")) {
+        removeExtensionVaultWidget();
       } else {
-        // Fallback for formless password submit inputs
-        passInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
+        if (autofillData && autofillData.length > 0) {
+          showExtensionVaultWidget(autofillData, "ready");
+        } else {
+          // Re-query credentials
+          chrome.runtime.sendMessage({ type: "GET_CREDENTIALS", domain: currentDomain });
+          showExtensionVaultWidget([], "no_creds");
+        }
+      }
+    };
+  }
+
+  function detectAndSetupForms() {
+    const inputs = document.querySelectorAll("input");
+    if (inputs.length === 0) return;
+
+    inputs.forEach(inputEl => {
+      if (inputEl.dataset.securepassBound) return;
+      inputEl.dataset.securepassBound = "true";
+
+      const showVaultOnFocus = () => {
+        if (autofillData && autofillData.length > 0) {
+          showExtensionVaultWidget(autofillData, "ready");
+        }
+      };
+
+      inputEl.addEventListener("focus", showVaultOnFocus);
+      inputEl.addEventListener("click", showVaultOnFocus);
+
+      const form = inputEl.closest("form");
+      if (form && !form.dataset.securepassFormBound) {
+        form.dataset.securepassFormBound = "true";
+        form.addEventListener("submit", () => {
+          const passInput = form.querySelector("input[type='password']");
+          const usernameInput = findUsernameField(passInput, form);
+          if (passInput) {
             captureCredentials(usernameInput, passInput);
           }
         });
@@ -131,14 +188,12 @@ if (isSecurePassTab) {
 
   function findUsernameField(passInput, form) {
     if (form) {
-      // Look inside the same form first
-      const fields = form.querySelectorAll("input[type='text'], input[type='email']");
+      const fields = form.querySelectorAll("input[type='text'], input[type='email'], input[name*='user'], input[name*='email']");
       if (fields.length > 0) return fields[0];
     }
     
-    // Look in surrounding DOM preceding the password field
     const inputs = Array.from(document.querySelectorAll("input"));
-    const passIdx = inputs.indexOf(passInput);
+    const passIdx = passInput ? inputs.indexOf(passInput) : -1;
     if (passIdx > 0) {
       for (let i = passIdx - 1; i >= 0; i--) {
         const input = inputs[i];
@@ -147,7 +202,7 @@ if (isSecurePassTab) {
         }
       }
     }
-    return null;
+    return inputs.find(i => i.type === "email" || i.type === "text" || i.name.includes("user") || i.name.includes("email")) || null;
   }
 
   // Capture credentials on submit event
@@ -156,7 +211,6 @@ if (isSecurePassTab) {
     const password = passInput ? passInput.value : "";
     
     if (username && password) {
-      // Save temporarily in sessionStorage so we can show "Save?" prompt on redirect
       sessionStorage.setItem("securepass_pending", JSON.stringify({
         domain: currentDomain,
         username,
@@ -174,12 +228,8 @@ if (isSecurePassTab) {
 
     try {
       const pending = JSON.parse(pendingStr);
-      // Ensure it's for this domain and within 5 minutes
       if (pending.domain === currentDomain && (Date.now() - pending.timestamp) < 300000) {
-        // Clear immediately so it doesn't prompt again
         sessionStorage.removeItem("securepass_pending");
-        
-        // Show save dialog!
         showSavePrompt(pending);
       }
     } catch (e) {
@@ -187,34 +237,347 @@ if (isSecurePassTab) {
     }
   }
 
+  let allLoginsData = [];
+
   // Listen for autofill credentials relay
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "AUTOFILL_CREDENTIALS") {
+      const trigText = document.getElementById("sp-trig-text");
+      allLoginsData = message.allLogins || [];
+
       if (message.data) {
-        autofillData = message.data;
-        injectAutofill(message.data);
+        const creds = Array.isArray(message.data) ? message.data : [message.data];
+        if (creds.length > 0) {
+          autofillData = creds;
+          if (trigText) trigText.textContent = `SecurePass (${creds.length})`;
+          showExtensionVaultWidget(creds, "ready");
+        } else if (allLoginsData.length > 0) {
+          autofillData = allLoginsData;
+          if (trigText) trigText.textContent = `SecurePass (${allLoginsData.length})`;
+          showExtensionVaultWidget(allLoginsData, "all_saved");
+        } else {
+          autofillData = null;
+          if (trigText) trigText.textContent = "SecurePass";
+          showExtensionVaultWidget([], "no_creds");
+        }
+      } else if (message.error && message.error.includes("locked")) {
+        autofillData = null;
+        if (trigText) trigText.textContent = "SecurePass (Locked)";
+        showExtensionVaultWidget([], "locked");
+      } else if (allLoginsData.length > 0) {
+        autofillData = allLoginsData;
+        if (trigText) trigText.textContent = `SecurePass (${allLoginsData.length})`;
+        showExtensionVaultWidget(allLoginsData, "all_saved");
+      } else {
+        autofillData = null;
+        if (trigText) trigText.textContent = "SecurePass";
+        showExtensionVaultWidget([], "no_creds");
       }
     }
   });
 
-  function injectAutofill(data) {
-    const passwordInputs = document.querySelectorAll("input[type='password']");
-    passwordInputs.forEach(passInput => {
-      const form = passInput.closest("form");
-      const usernameInput = findUsernameField(passInput, form);
+  function showExtensionVaultWidget(credsList, statusType = "ready") {
+    if (document.getElementById("securepass-extension-vault-popup")) return;
 
-      if (usernameInput && data.username) {
-        usernameInput.value = data.username;
-        usernameInput.dispatchEvent(new Event("input", { bubbles: true }));
-        usernameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    const popup = document.createElement("div");
+    popup.id = "securepass-extension-vault-popup";
+
+    const style = document.createElement("style");
+    style.id = "securepass-vault-popup-styles";
+    style.textContent = `
+      #securepass-extension-vault-popup {
+        position: fixed !important;
+        top: 24px !important;
+        right: 24px !important;
+        width: 330px !important;
+        z-index: 2147483647 !important;
+        background: #0f172a !important;
+        border: 1px solid rgba(6, 182, 212, 0.4) !important;
+        border-radius: 12px !important;
+        padding: 14px 16px !important;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.8), 0 0 15px rgba(6, 182, 212, 0.15) !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        color: #f8fafc !important;
+        box-sizing: border-box !important;
+        animation: spVaultPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
       }
-      
-      if (passInput && data.password) {
-        passInput.value = data.password;
-        passInput.dispatchEvent(new Event("input", { bubbles: true }));
-        passInput.dispatchEvent(new Event("change", { bubbles: true }));
+      @keyframes spVaultPopIn {
+        from { transform: translateY(-20px) scale(0.95); opacity: 0; }
+        to { transform: translateY(0) scale(1); opacity: 1; }
       }
+      .sp-vp-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        margin-bottom: 10px !important;
+        padding-bottom: 8px !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      }
+      .sp-vp-title-group {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+      }
+      .sp-vp-title {
+        font-weight: 700 !important;
+        font-size: 13px !important;
+        background: linear-gradient(135deg, #06b6d4, #3b82f6) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        letter-spacing: 0.02em !important;
+      }
+      .sp-vp-badge {
+        font-size: 10px !important;
+        font-weight: 600 !important;
+        background: rgba(6, 182, 212, 0.15) !important;
+        color: #22d3ee !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+        border: 1px solid rgba(6, 182, 212, 0.3) !important;
+      }
+      .sp-vp-close {
+        background: none !important;
+        border: none !important;
+        color: #94a3b8 !important;
+        font-size: 16px !important;
+        cursor: pointer !important;
+        padding: 0 4px !important;
+        line-height: 1 !important;
+        border-radius: 4px !important;
+      }
+      .sp-vp-close:hover {
+        color: #ffffff !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+      }
+      .sp-vp-list {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+        max-height: 220px !important;
+        overflow-y: auto !important;
+      }
+      .sp-vp-item {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        background: rgba(30, 41, 59, 0.7) !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-radius: 8px !important;
+        padding: 8px 10px !important;
+        gap: 8px !important;
+        transition: border-color 0.15s ease !important;
+      }
+      .sp-vp-item:hover {
+        border-color: rgba(6, 182, 212, 0.4) !important;
+        background: rgba(30, 41, 59, 0.95) !important;
+      }
+      .sp-vp-user-info {
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+      }
+      .sp-vp-username {
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        color: #f1f5f9 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+      .sp-vp-site {
+        font-size: 10px !important;
+        color: #64748b !important;
+      }
+      .sp-vp-fill-btn {
+        background: linear-gradient(135deg, #06b6d4, #3b82f6) !important;
+        color: #ffffff !important;
+        border: none !important;
+        padding: 5px 10px !important;
+        border-radius: 6px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        white-space: nowrap !important;
+        box-shadow: 0 2px 8px rgba(6, 182, 212, 0.3) !important;
+        transition: transform 0.1s ease, box-shadow 0.1s ease !important;
+      }
+      .sp-vp-fill-btn:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4) !important;
+      }
+      .sp-vp-action-btn {
+        width: 100% !important;
+        background: linear-gradient(135deg, #06b6d4, #3b82f6) !important;
+        color: #ffffff !important;
+        border: none !important;
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        margin-top: 6px !important;
+      }
+      .sp-vp-footer {
+        margin-top: 10px !important;
+        font-size: 10px !important;
+        color: #64748b !important;
+        text-align: center !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 4px !important;
+      }
+    `;
+
+    let bodyHtml = "";
+    let badgeText = "Vault Ready";
+
+    const displayList = (credsList && credsList.length > 0) ? credsList : allLoginsData;
+
+    if (displayList && displayList.length > 0) {
+      const isExactMatch = statusType === "ready";
+      badgeText = isExactMatch ? `${credsList.length} Ready` : `${displayList.length} Saved`;
+
+      const itemsHtml = displayList.map((item, idx) => `
+        <div class="sp-vp-item">
+          <div class="sp-vp-user-info">
+            <span class="sp-vp-username">👤 ${escapeHtml(item.username || "Account")}</span>
+            <span class="sp-vp-site">${escapeHtml(item.name || item.title || item.url || "Vault Password")}</span>
+          </div>
+          <button class="sp-vp-fill-btn" data-index="${idx}">⚡ AutoFill</button>
+        </div>
+      `).join("");
+
+      bodyHtml = `
+        ${!isExactMatch ? `<div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">Select from your saved vault passwords:</div>` : ''}
+        <div class="sp-vp-list">${itemsHtml}</div>
+        <button id="sp-vp-open-dash" class="sp-vp-action-btn" style="background: rgba(255,255,255,0.06) !important; border: 1px solid rgba(255,255,255,0.1) !important; margin-top: 8px !important;">➕ Save Password for ${escapeHtml(currentDomain)}</button>
+      `;
+    } else if (statusType === "locked") {
+      badgeText = "Locked";
+      bodyHtml = `
+        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+          Vault is locked. Open dashboard to unlock passwords.
+        </div>
+        <button id="sp-vp-open-dash" class="sp-vp-action-btn">🔓 Open Web Dashboard</button>
+      `;
+    } else {
+      badgeText = "Active";
+      bodyHtml = `
+        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+          No saved logins found in your vault.
+        </div>
+        <button id="sp-vp-open-dash" class="sp-vp-action-btn">➕ Open Web Dashboard to Save</button>
+      `;
+    }
+
+    popup.innerHTML = `
+      <div class="sp-vp-header">
+        <div class="sp-vp-title-group">
+          <span>🛡️</span>
+          <span class="sp-vp-title">SecurePass Extension</span>
+          <span class="sp-vp-badge">${badgeText}</span>
+        </div>
+        <button id="sp-vp-close-btn" class="sp-vp-close" title="Dismiss">✕</button>
+      </div>
+      ${bodyHtml}
+      <div class="sp-vp-footer">
+        🔒 Zero-Knowledge Encrypted
+      </div>
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(popup);
+
+    // Event listeners
+    document.getElementById("sp-vp-close-btn").onclick = () => {
+      removeExtensionVaultWidget();
+    };
+
+    const openDashBtn = document.getElementById("sp-vp-open-dash");
+    if (openDashBtn) {
+      openDashBtn.onclick = () => {
+        window.open("http://localhost:5173/vault", "_blank");
+      };
+    }
+
+    const fillButtons = popup.querySelectorAll(".sp-vp-fill-btn");
+    fillButtons.forEach(btn => {
+      btn.onclick = (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        const selectedCred = displayList[idx];
+        if (selectedCred) {
+          injectAutofill(selectedCred);
+          btn.textContent = "✓ Filled!";
+          btn.style.background = "#10b981";
+          setTimeout(() => {
+            removeExtensionVaultWidget();
+          }, 600);
+        }
+      };
     });
+  }
+
+  function removeExtensionVaultWidget() {
+    const popup = document.getElementById("securepass-extension-vault-popup");
+    const style = document.getElementById("securepass-vault-popup-styles");
+    if (popup) popup.remove();
+    if (style) style.remove();
+  }
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function injectAutofill(data) {
+    if (!data) return;
+    const cred = Array.isArray(data) ? data[0] : data;
+
+    // 1. Find username / email input element
+    let usernameInput = document.querySelector("input[name='email'], input[name='username'], input[type='email'], input[id='email'], input[autocomplete='username'], input[autocomplete='email']");
+    if (!usernameInput) {
+      const textInputs = document.querySelectorAll("input[type='text'], input[type='email']");
+      if (textInputs.length > 0) usernameInput = textInputs[0];
+    }
+
+    // 2. Find password input element
+    let passInput = document.querySelector("input[type='password'], input[name='pass'], input[name='password'], input[id='pass'], input[autocomplete='current-password']");
+
+    // 3. Inject username & password using prototype setter for React/Vue/Facebook compatibility
+    if (usernameInput && cred.username) {
+      setNativeInputValue(usernameInput, cred.username);
+    }
+    
+    if (passInput && cred.password) {
+      setNativeInputValue(passInput, cred.password);
+    }
+  }
+
+  function setNativeInputValue(inputEl, value) {
+    if (!inputEl) return;
+    try {
+      const valueSetter = Object.getOwnPropertyDescriptor(inputEl, 'value')?.set ||
+                          Object.getOwnPropertyDescriptor(Object.getPrototypeOf(inputEl), 'value')?.set;
+      if (valueSetter) {
+        valueSetter.call(inputEl, value);
+      } else {
+        inputEl.value = value;
+      }
+    } catch (e) {
+      inputEl.value = value;
+    }
+
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+    inputEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
   }
 
   // Show a premium floating save password prompt
@@ -344,15 +707,22 @@ if (isSecurePassTab) {
   // ==========================================
   // AUTOMATIC AI PHISHING PROTECTION
   // ==========================================
-  chrome.runtime.sendMessage({ type: "CHECK_URL_PHISHING", url: window.location.href }, (res) => {
-    if (res && res.isPhishing) {
-      showPhishingWarningOverlay(res.result, window.location.href);
-    }
-  });
+  const SAFE_DOMAINS_LIST = ["google.", "bing.com", "duckduckgo.com", "yahoo.com", "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com", "amazon.com", "wikipedia.org", "localhost"];
+  const currentHref = window.location.href.toLowerCase();
+
+  if (!SAFE_DOMAINS_LIST.some(d => currentHref.includes(d))) {
+    chrome.runtime.sendMessage({ type: "CHECK_URL_PHISHING", url: window.location.href }, (res) => {
+      if (res && res.isPhishing) {
+        showPhishingWarningOverlay(res.result, window.location.href);
+      }
+    });
+  }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "PHISHING_WARNING") {
-      showPhishingWarningOverlay(message.result, message.url);
+      if (!SAFE_DOMAINS_LIST.some(d => (message.url || "").toLowerCase().includes(d))) {
+        showPhishingWarningOverlay(message.result, message.url);
+      }
     }
   });
 
@@ -449,7 +819,7 @@ if (isSecurePassTab) {
       if (window.history.length > 1) {
         window.history.back();
       } else {
-        window.location.href = "http://localhost:5173/vault";
+        window.close();
       }
     };
 

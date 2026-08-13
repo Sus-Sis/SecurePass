@@ -58,17 +58,39 @@ try:
 except Exception as e:
     print(f"[AI Security Module] Could not load model: {e}")
 
+from urllib.parse import urlparse
+
+SAFE_DOMAINS_WHITELIST = {
+    "google.com", "google.np", "google.co.in", "google.co.uk", "google.ca", "google.de", "google.fr",
+    "bing.com", "duckduckgo.com", "yahoo.com", "baidu.com", "yandex.com",
+    "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com",
+    "amazon.com", "wikipedia.org", "linkedin.com", "twitter.com", "x.com",
+    "instagram.com", "reddit.com", "stackoverflow.com", "localhost", "127.0.0.1"
+}
+
 @app.post("/api/scan-url", response_model=schemas.URLScanResponse)
 async def scan_url(request_data: schemas.URLScanRequest):
     url = request_data.url.strip()
     if not url:
         return {"url": "", "is_safe": True, "prediction": "good", "risk_level": "Safe"}
 
-    clean_url = (
+    try:
+        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+        domain = parsed.hostname.lower().replace("www.", "") if parsed.hostname else ""
+    except Exception:
+        domain = ""
+
+    # Instant whitelist check for trusted top-level domains & search engines
+    if domain and any(domain == d or domain.endswith("." + d) for d in SAFE_DOMAINS_WHITELIST):
+        return {"url": url, "is_safe": True, "prediction": "good", "risk_level": "Safe"}
+
+    # Strip long search query params to prevent false positives on query strings
+    clean_url = domain if domain else (
         url.lower()
         .replace("https://", "")
         .replace("http://", "")
         .replace("www.", "")
+        .split("?")[0]
     )
 
     if svm_model and vectorizer:

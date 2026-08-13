@@ -1,12 +1,26 @@
 let securepassTabId = null;
 const scannedUrlCache = new Map();
 
+const SAFE_DOMAINS_WHITELIST = [
+  "google.com", "google.np", "google.co.in", "google.co.uk", "google.ca", "google.de", "google.fr",
+  "bing.com", "duckduckgo.com", "yahoo.com", "baidu.com", "yandex.com",
+  "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com",
+  "amazon.com", "wikipedia.org", "linkedin.com", "twitter.com", "x.com",
+  "instagram.com", "reddit.com", "stackoverflow.com", "localhost"
+];
+
 // Helper: Scan URL against SecurePass AI Phishing Backend
 async function scanUrlWithAi(url) {
   if (!url || !url.startsWith("http")) return { is_safe: true, prediction: "good" };
   
-  // Ignore internal pages & SecurePass app itself
-  if (url.includes("localhost:5173") || url.includes("localhost:3000") || url.includes("securepass.com")) {
+  const lowerUrl = url.toLowerCase();
+
+  // Ignore search engines, trusted domains, internal pages & SecurePass app itself
+  if (SAFE_DOMAINS_WHITELIST.some(d => lowerUrl.includes(d)) ||
+      lowerUrl.includes("localhost") || 
+      lowerUrl.includes("securepass.com") ||
+      lowerUrl.includes("sp_bypass_phishing=true") ||
+      lowerUrl.includes("warning.html")) {
     return { is_safe: true, prediction: "good" };
   }
 
@@ -37,12 +51,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const url = changeInfo.url || tab.url;
   if (url && url.startsWith("http")) {
 
-    // Ignore internal pages, warning page itself, bypass links, & SecurePass web app tabs
-    if (url.includes("localhost:5173") || 
-        url.includes("localhost:3000") || 
-        url.includes("securepass.com") || 
-        url.includes("sp_bypass_phishing=true") || 
-        url.includes("warning.html")) {
+    const lowerUrl = url.toLowerCase();
+
+    // Ignore search engines, trusted domains, warning page, bypass links & SecurePass web app
+    if (SAFE_DOMAINS_WHITELIST.some(d => lowerUrl.includes(d)) ||
+        lowerUrl.includes("localhost") || 
+        lowerUrl.includes("securepass.com") || 
+        lowerUrl.includes("sp_bypass_phishing=true") || 
+        lowerUrl.includes("warning.html")) {
       return;
     }
 
@@ -129,11 +145,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 3. Web App relays decrypted credentials back to background
   if (message.type === "RELAY_CREDENTIALS") {
-    const { requesterTabId, credentials } = message;
+    const { requesterTabId, credentials, allLogins } = message;
     if (requesterTabId) {
       chrome.tabs.sendMessage(requesterTabId, { 
         type: "AUTOFILL_CREDENTIALS", 
-        data: credentials 
+        data: credentials,
+        allLogins: allLogins
       });
     }
     sendResponse({ success: true });

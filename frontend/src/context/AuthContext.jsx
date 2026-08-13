@@ -295,17 +295,34 @@ export function AuthProvider({ children }) {
 
       if (event.data.type === "SECUREPASS_GET_CREDENTIALS") {
         if (decryptedVault) {
-          const domain = event.data.domain;
-          const match = decryptedVault.find(c => c.url && c.url.includes(domain));
+          const rawDomain = (event.data.domain || "").toLowerCase().replace(/^www\./, "");
+          const domainBase = rawDomain.split('.')[0];
+          
+          const allLogins = decryptedVault.filter(c => (c.category === "Logins" || c.password) && (c.username || c.password));
+          const matches = allLogins.filter(c => {
+            const cleanUrl = (c.url || "").toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "");
+            const itemDomain = cleanUrl.split("/")[0].split(":")[0];
+            const itemName = (c.name || c.title || "").toLowerCase();
+
+            return (
+              (itemDomain && (itemDomain.includes(rawDomain) || rawDomain.includes(itemDomain))) ||
+              (cleanUrl && cleanUrl.includes(rawDomain)) ||
+              (domainBase.length > 2 && itemName.includes(domainBase)) ||
+              (domainBase.length > 2 && (c.url || "").toLowerCase().includes(domainBase))
+            );
+          });
+
           window.postMessage({
             type: "SECUREPASS_CREDENTIALS",
-            data: match || null,
+            data: matches,
+            allLogins: allLogins,
             requesterTabId: event.data.requesterTabId
           }, "*");
         } else {
           window.postMessage({
             type: "SECUREPASS_CREDENTIALS",
-            data: null,
+            data: [],
+            allLogins: [],
             error: "Vault is locked",
             requesterTabId: event.data.requesterTabId
           }, "*");

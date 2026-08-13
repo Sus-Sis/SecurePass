@@ -10,7 +10,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSafety = document.getElementById("btn-back-safety");
   if (btnSafety) {
     btnSafety.onclick = () => {
-      window.location.href = "http://localhost:5173/vault";
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
     };
   }
 
