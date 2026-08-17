@@ -39,9 +39,11 @@ export default function Settings() {
   const [toastMessage, setToastMessage] = useState("");
 
   useEffect(() => {
-    fetchLogs();
+    if (user?.is_admin) {
+      fetchLogs();
+    }
     checkUserMfaStatus();
-  }, []);
+  }, [user]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -315,49 +317,51 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* 4. Activity Logs Section */}
-      <section className="card settings-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-          <h2 className="settings-section-title" style={{ borderBottom: 'none', margin: 0 }}>Activity Log History</h2>
-          <button onClick={handleExportLogsCSV} disabled={logs.length === 0} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
-            Export CSV
-          </button>
-        </div>
-
-        {logsLoading ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>Loading logs...</p>
-        ) : logs.length === 0 ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No logs recorded yet.</p>
-        ) : (
-          <div className="logs-table-container">
-            <table className="logs-table">
-              <thead>
-                <tr>
-                  <th>Action Event</th>
-                  <th>Timestamp</th>
-                  <th>IP Address</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map(log => (
-                  <tr key={log.id}>
-                    <td>
-                      <span className={`badge ${
-                        log.action.includes("success") || log.action.includes("enabled") ? "badge-success" : 
-                        log.action.includes("failed") || log.action.includes("delete") ? "badge-danger" : "badge-info"
-                      }`}>
-                        {log.action.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td>{new Date(log.timestamp).toLocaleString()}</td>
-                    <td>{log.ip_address || "unknown"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* 4. Activity Logs Section (Admins Only) */}
+      {user?.is_admin && (
+        <section className="card settings-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+            <h2 className="settings-section-title" style={{ borderBottom: 'none', margin: 0 }}>Activity Log History</h2>
+            <button onClick={handleExportLogsCSV} disabled={logs.length === 0} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+              Export CSV
+            </button>
           </div>
-        )}
-      </section>
+
+          {logsLoading ? (
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>Loading logs...</p>
+          ) : logs.length === 0 ? (
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>No logs recorded yet.</p>
+          ) : (
+            <div className="logs-table-container">
+              <table className="logs-table">
+                <thead>
+                  <tr>
+                    <th>Action Event</th>
+                    <th>Timestamp</th>
+                    <th>IP Address</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map(log => (
+                    <tr key={log.id}>
+                      <td>
+                        <span className={`badge ${
+                          log.action.includes("success") || log.action.includes("enabled") ? "badge-success" : 
+                          log.action.includes("failed") || log.action.includes("delete") ? "badge-danger" : "badge-info"
+                        }`}>
+                          {log.action.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td>{new Date(log.timestamp).toLocaleString()}</td>
+                      <td>{log.ip_address || "unknown"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 5. Delete Account Section */}
       <section className="card settings-section" style={{ borderColor: 'rgba(239, 68, 68, 0.3)' }}>

@@ -80,9 +80,15 @@ export function AuthProvider({ children }) {
         try {
           const vaultRes = await api.getVault(savedToken);
           setToken(savedToken);
-          setUser({ email: savedEmail });
           setEncryptedVault(vaultRes.encrypted_vault);
           setIsLocked(true);
+          
+          try {
+            const meRes = await api.getMe(savedToken);
+            setUser({ email: meRes.email, mfa_enabled: meRes.mfa_enabled, is_admin: meRes.is_admin });
+          } catch (e) {
+            setUser({ email: savedEmail, is_admin: false });
+          }
         } catch (err) {
           eraseCookie("securepass_session");
           eraseCookie("securepass_email");
@@ -93,6 +99,19 @@ export function AuthProvider({ children }) {
 
     initializeSession();
   }, []);
+
+  useEffect(() => {
+    if (token) {
+      api.getMe(token).then((meRes) => {
+        setUser((prev) => ({
+          ...(prev || {}),
+          email: meRes.email,
+          mfa_enabled: meRes.mfa_enabled,
+          is_admin: meRes.is_admin
+        }));
+      }).catch(() => {});
+    }
+  }, [token]);
 
   const register = async (email, password) => {
     setLoading(true);
@@ -129,6 +148,15 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const fetchUserDetails = async (authToken, defaultEmail) => {
+    try {
+      const meRes = await api.getMe(authToken);
+      return { email: meRes.email, mfa_enabled: meRes.mfa_enabled, is_admin: meRes.is_admin };
+    } catch (e) {
+      return { email: defaultEmail, is_admin: false };
+    }
+  };
+
   const login = async (email, password, mfaCode = null) => {
     setLoading(true);
     try {
@@ -146,8 +174,10 @@ export function AuthProvider({ children }) {
           return { mfaRequired: true };
         }
 
+        const userDetails = await fetchUserDetails(res.access_token, email);
+
         setToken(res.access_token);
-        setUser({ email });
+        setUser(userDetails);
         setMasterKey(mk);
         setEncryptedVault(res.encrypted_vault);
         
@@ -175,8 +205,10 @@ export function AuthProvider({ children }) {
         throw new Error("Server authentication proof verification failed (MITM detected)");
       }
 
+      const userDetails = await fetchUserDetails(authRes.access_token, email);
+
       setToken(authRes.access_token);
-      setUser({ email });
+      setUser(userDetails);
       setMasterKey(mk);
       setEncryptedVault(authRes.encrypted_vault);
       
@@ -204,6 +236,9 @@ export function AuthProvider({ children }) {
       setMasterKey(mk);
       setDecryptedVault(decrypted);
       setIsLocked(false);
+
+      const userDetails = await fetchUserDetails(token, user.email);
+      setUser(userDetails);
       return true;
     } catch (err) {
       throw new Error("Incorrect master password");

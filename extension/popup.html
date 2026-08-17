@@ -52,6 +52,21 @@
         Go to Web Dashboard
       </button>
     </div>
+
+    <!-- Screen 3: Phishing Blocked Screen -->
+    <div id="screen-phishing" class="screen hidden">
+      <div class="warning-icon">🚨</div>
+      <h3 style="color: #f87171; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Phishing Threat Blocked</h3>
+      <p class="warning-text" style="color: #cbd5e1; margin-bottom: 12px;">
+        SecurePass AI has flagged <strong id="phishing-domain-display" style="color: #f87171;">this website</strong> as a dangerous phishing attempt.
+      </p>
+      <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; font-size: 11px; color: #f8fafc; margin-bottom: 16px; line-height: 1.4;">
+        🔒 Password vault access, autofill, and credential copying are strictly blocked on this page to keep your account safe.
+      </div>
+      <button id="btn-phishing-close" class="btn btn-secondary" style="margin-top: auto;">
+        Dismiss Warning
+      </button>
+    </div>
   </main>
 
   <div id="toast" class="toast hidden">Copied!</div>

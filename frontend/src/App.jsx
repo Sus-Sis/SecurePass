@@ -6,35 +6,33 @@ import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
+import Admin from "./pages/Admin";
 
 function Navigation() {
   const { token, isLocked, logout, lock, user } = useAuth();
   const location = useLocation();
-  const [currentTheme, setCurrentTheme] = React.useState(localStorage.getItem("securepass_theme") || "obsidian");
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef(null);
 
   React.useEffect(() => {
-    const savedTheme = localStorage.getItem("securepass_theme");
-    if (savedTheme && savedTheme !== "obsidian") {
-      document.documentElement.setAttribute("data-theme", savedTheme);
-    }
-  }, []);
+    setMenuOpen(false);
+  }, [location.pathname]);
 
-  const changeTheme = (e) => {
-    const theme = e.target.value;
-    setCurrentTheme(theme);
-    localStorage.setItem("securepass_theme", theme);
-    if (theme === "obsidian") {
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      document.documentElement.setAttribute("data-theme", theme);
-    }
-  };
+  React.useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   if (!token || isLocked) return null;
 
   return (
-    <nav className="navbar" style={{ padding: '0.85rem 1.75rem', background: 'rgba(9, 13, 22, 0.85)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-      <div className="nav-brand" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+    <nav className="navbar" style={{ padding: '0.85rem 1.75rem', background: 'rgba(9, 13, 22, 0.85)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', position: 'relative', zIndex: 1000 }}>
+      <Link to="/vault" className="nav-brand" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textDecoration: 'none', cursor: 'pointer' }}>
         <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', boxShadow: '0 0 15px rgba(6, 182, 212, 0.4)' }}>
           🛡️
         </div>
@@ -44,48 +42,173 @@ function Navigation() {
         <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.15)', border: '1px solid rgba(6, 182, 212, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '12px' }}>
           Zero-Knowledge
         </span>
-      </div>
+      </Link>
       
-      <div className="nav-links" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-        <Link 
-          to="/vault" 
-          className={`nav-link ${location.pathname === "/vault" ? "active" : ""}`}
-          style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.88rem', fontWeight: 600 }}
+      {/* Consolidated Single User Account & Navigation Menu */}
+      <div style={{ position: 'relative' }} ref={menuRef}>
+        <button 
+          onClick={() => setMenuOpen(!menuOpen)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.55rem',
+            background: menuOpen ? 'rgba(6, 182, 212, 0.2)' : 'rgba(30, 41, 59, 0.7)',
+            border: menuOpen ? '1px solid var(--accent-cyan)' : '1px solid rgba(255, 255, 255, 0.12)',
+            color: '#f8fafc',
+            padding: '0.45rem 0.95rem',
+            borderRadius: '24px',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: menuOpen ? '0 0 15px rgba(6, 182, 212, 0.25)' : 'none'
+          }}
         >
-          🔐 Vault Workspace
-        </Link>
-        <Link 
-          to="/settings" 
-          className={`nav-link ${location.pathname === "/settings" ? "active" : ""}`}
-          style={{ padding: '0.4rem 0.85rem', borderRadius: '8px', fontSize: '0.88rem', fontWeight: 600 }}
-        >
-          ⚙️ Settings
-        </Link>
-
-        {/* Theme Picker Dropdown */}
-        <select 
-          value={currentTheme}
-          onChange={changeTheme}
-          style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.12)', color: '#f1f5f9', padding: '0.35rem 0.65rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
-          title="Change Color Theme"
-        >
-          <option value="obsidian">🎨 Obsidian Cyan</option>
-          <option value="emerald">🌿 Dark Emerald</option>
-          <option value="amethyst">🔮 Amethyst Violet</option>
-          <option value="titanium">⚡ Titanium Blue</option>
-        </select>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(30, 41, 59, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', padding: '0.3rem 0.75rem', borderRadius: '20px', fontSize: '0.78rem', color: '#cbd5e1' }}>
-          <span>👤</span>
+          <span style={{ fontSize: '0.95rem' }}>👤</span>
           <span>{user?.email}</span>
-        </div>
+          {user?.is_admin && (
+            <span style={{ background: 'rgba(245, 158, 11, 0.25)', border: '1px solid rgba(245, 158, 11, 0.4)', color: '#fbbf24', padding: '0.1rem 0.45rem', borderRadius: '10px', fontSize: '0.68rem', fontWeight: 800 }}>
+              👑 ADMIN
+            </span>
+          )}
+          <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginLeft: '0.2rem', transform: menuOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+            ▼
+          </span>
+        </button>
 
-        <button onClick={lock} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-          🔒 Lock Vault
-        </button>
-        <button onClick={logout} className="btn btn-danger" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
-          Log Out
-        </button>
+        {/* Dropdown Menu */}
+        {menuOpen && (
+          <div style={{
+            position: 'absolute',
+            top: 'calc(100% + 0.6rem)',
+            right: 0,
+            width: '230px',
+            background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.96))',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '14px',
+            padding: '0.5rem',
+            boxShadow: '0 15px 35px rgba(0, 0, 0, 0.6)',
+            backdropFilter: 'blur(20px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.25rem',
+            animation: 'fadeInMenu 0.15s ease-out'
+          }}>
+            <Link 
+              to="/vault"
+              onClick={() => setMenuOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                color: location.pathname === "/vault" ? 'var(--accent-cyan)' : '#f8fafc',
+                background: location.pathname === "/vault" ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+                fontWeight: 600,
+                fontSize: '0.86rem',
+                textDecoration: 'none'
+              }}
+            >
+              <span>🔐</span>
+              <span>Vault Workspace</span>
+            </Link>
+
+            {user?.is_admin && (
+              <Link 
+                to="/admin"
+                onClick={() => setMenuOpen(false)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '8px',
+                  color: location.pathname === "/admin" ? '#fbbf24' : '#fbbf24',
+                  background: location.pathname === "/admin" ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.08)',
+                  fontWeight: 700,
+                  fontSize: '0.86rem',
+                  textDecoration: 'none'
+                }}
+              >
+                <span>👑</span>
+                <span>Admin Panel</span>
+              </Link>
+            )}
+
+            <Link 
+              to="/settings"
+              onClick={() => setMenuOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                color: location.pathname === "/settings" ? 'var(--accent-cyan)' : '#f8fafc',
+                background: location.pathname === "/settings" ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+                fontWeight: 600,
+                fontSize: '0.86rem',
+                textDecoration: 'none'
+              }}
+            >
+              <span>⚙️</span>
+              <span>Settings</span>
+            </Link>
+
+            <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '0.25rem 0' }} />
+
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                lock();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                color: '#cbd5e1',
+                background: 'transparent',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '0.86rem',
+                cursor: 'pointer',
+                textAlign: 'left',
+                width: '100%'
+              }}
+            >
+              <span>🔒</span>
+              <span>Lock Vault</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                logout();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                color: '#f87171',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '0.86rem',
+                cursor: 'pointer',
+                textAlign: 'left',
+                width: '100%'
+              }}
+            >
+              <span>🚪</span>
+              <span>Log Out</span>
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );
@@ -96,13 +219,26 @@ function ProtectedRoute({ children }) {
   const location = useLocation();
 
   if (!token) {
-    // Redirect to login if not authenticated at all
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (isLocked) {
-    // Redirect to login (which will render the unlock screen) if session is active but vault is locked
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+}
+
+function AdminRoute({ children }) {
+  const { token, isLocked, user } = useAuth();
+  const location = useLocation();
+
+  if (!token || isLocked) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (!user?.is_admin) {
+    return <Navigate to="/vault" replace />;
   }
 
   return children;
@@ -146,6 +282,14 @@ function AppContent() {
             <ProtectedRoute>
               <Settings />
             </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin" 
+          element={
+            <AdminRoute>
+              <Admin />
+            </AdminRoute>
           } 
         />
         {/* Fallback */}

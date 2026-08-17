@@ -152,6 +152,47 @@ class ChangePasswordRequest(BaseModel):
 class UserMeResponse(BaseModel):
     email: EmailStr
     mfa_enabled: bool
+    is_admin: bool = False
 
 class MessageResponse(BaseModel):
     message: str
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    active_sessions: int
+    locked_accounts: int
+    mfa_users: int
+    total_logs: int
+    phishing_model_status: str
+
+class AdminUserItem(BaseModel):
+    id: int
+    email: str
+    is_admin: bool
+    mfa_enabled: bool
+    created_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
+    failed_attempts: int = 0
+    locked_until: Optional[datetime] = None
+    active_sessions_count: int = 0
+
+class AdminUserListResponse(BaseModel):
+    users: List[AdminUserItem]
+
+class AdminRoleToggleRequest(BaseModel):
+    is_admin: bool
+
+class AdminLockoutRequest(BaseModel):
+    locked: bool
+
+class AdminLogItem(BaseModel):
+    id: int
+    user_id: int
+    email: str
+    action: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    timestamp: datetime
+
+class AdminLogListResponse(BaseModel):
+    logs: List[AdminLogItem]

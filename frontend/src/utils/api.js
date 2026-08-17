@@ -90,4 +90,13 @@ export const api = {
   // AI Phishing Scan
   scanUrl: (url) => 
     request("/api/scan-url", "POST", { url }),
+
+  // Admin Management Endpoints
+  getAdminStats: (token) => request("/api/admin/stats", "GET", null, token),
+  getAdminUsers: (token) => request("/api/admin/users", "GET", null, token),
+  toggleAdminRole: (token, userId, isAdmin) => request(`/api/admin/users/${userId}/role`, "PUT", { is_admin: isAdmin }, token),
+  toggleUserLockout: (token, userId, locked) => request(`/api/admin/users/${userId}/lockout`, "PUT", { locked }, token),
+  revokeUserSessions: (token, userId) => request(`/api/admin/users/${userId}/revoke-sessions`, "POST", null, token),
+  deleteAdminUser: (token, userId) => request(`/api/admin/users/${userId}`, "DELETE", null, token),
+  getAdminLogs: (token) => request("/api/admin/logs", "GET", null, token),
 };

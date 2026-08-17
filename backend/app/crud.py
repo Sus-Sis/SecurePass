@@ -9,6 +9,9 @@ def get_user_by_email(db: DbSession, email: str) -> Optional[models.User]:
 
 def create_user(db: DbSession, user: schemas.UserRegister, hashed_verifier: str, hashed_recovery_code: str) -> models.User:
     kdf_params_str = json.dumps(user.kdf_params) if user.kdf_params else None
+    user_count = db.query(models.User).count()
+    is_first_user = (user_count == 0)
+    
     db_user = models.User(
         email=user.email.lower(),
         salt=user.salt,
@@ -18,6 +21,7 @@ def create_user(db: DbSession, user: schemas.UserRegister, hashed_verifier: str,
         encrypted_vault=user.encrypted_vault,
         encrypted_key_recovery=user.encrypted_key_recovery,
         recovery_codes_hash=hashed_recovery_code,
+        is_admin=is_first_user,
     )
     db.add(db_user)
     db.commit()
@@ -128,3 +132,85 @@ def get_activity_logs(db: DbSession, user_id: int, limit: int = 100) -> list[mod
     return db.query(models.ActivityLog).filter(
         models.ActivityLog.user_id == user_id
     ).order_by(models.ActivityLog.timestamp.desc()).limit(limit).all()
+
+# Admin CRUD operations
+
+def get_system_stats(db: DbSession, phishing_model_active: bool = True) -> dict:
+    total_users = db.query(models.User).count()
+    active_sessions = db.query(models.Session).filter(models.Session.expires_at > datetime.utcnow()).count()
+    locked_accounts = db.query(models.User).filter(models.User.locked_until > datetime.utcnow()).count()
+    mfa_users = db.query(models.User).filter(models.User.mfa_enabled == True).count()
+    total_logs = db.query(models.ActivityLog).count()
+    
+    return {
+        "total_users": total_users,
+        "active_sessions": active_sessions,
+        "locked_accounts": locked_accounts,
+        "mfa_users": mfa_users,
+        "total_logs": total_logs,
+        "phishing_model_status": "Active (SVM Classifier)" if phishing_model_active else "Offline"
+    }
+
+def get_all_users_for_admin(db: DbSession) -> list:
+    users = db.query(models.User).order_by(models.User.created_at.desc()).all()
+    result = []
+    now = datetime.utcnow()
+    
+    for u in users:
+        active_sessions_count = db.query(models.Session).filter(
+            models.Session.user_id == u.id,
+            models.Session.expires_at > now
+        ).count()
+        
+        result.append({
+            "id": u.id,
+            "email": u.email,
+            "is_admin": bool(u.is_admin),
+            "mfa_enabled": bool(u.mfa_enabled),
+            "created_at": u.created_at,
+            "last_login": u.last_login,
+            "failed_attempts": u.failed_attempts or 0,
+            "locked_until": u.locked_until,
+            "active_sessions_count": active_sessions_count
+        })
+    return result
+
+def toggle_user_admin_role(db: DbSession, user_id: int, is_admin: bool) -> Optional[models.User]:
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if db_user:
+        db_user.is_admin = is_admin
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+def set_user_lockout(db: DbSession, user_id: int, locked: bool) -> Optional[models.User]:
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if db_user:
+        if locked:
+            db_user.locked_until = datetime.utcnow() + timedelta(days=365)
+            db_user.failed_attempts = 10
+        else:
+            db_user.locked_until = None
+            db_user.failed_attempts = 0
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+def get_all_activity_logs_admin(db: DbSession, limit: int = 150) -> list:
+    logs = db.query(models.ActivityLog, models.User.email).join(
+        models.User, models.ActivityLog.user_id == models.User.id
+    ).order_by(models.ActivityLog.timestamp.desc()).limit(limit).all()
+    
+    result = []
+    for log, email in logs:
+        result.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "email": email,
+            "action": log.action,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "timestamp": log.timestamp
+        })
+    return result
+

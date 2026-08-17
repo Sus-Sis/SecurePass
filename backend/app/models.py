@@ -21,6 +21,7 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     failed_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)
+    is_admin = Column(Boolean, default=False)
 
     logs = relationship("ActivityLog", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")

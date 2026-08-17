@@ -82,6 +82,18 @@ if (isSecurePassTab) {
   // THIRD PARTY WEBSITE LOGIC
   // ==========================================
   
+  let isPhishingPage = false;
+
+  function disableVaultForPhishing() {
+    isPhishingPage = true;
+    autofillData = null;
+    removeExtensionVaultWidget();
+    const trigger = document.getElementById("securepass-floating-trigger");
+    const triggerStyle = document.getElementById("securepass-floating-trigger-styles");
+    if (trigger) trigger.remove();
+    if (triggerStyle) triggerStyle.remove();
+  }
+
   // Run on load immediately
   chrome.runtime.sendMessage({ type: "GET_CREDENTIALS", domain: currentDomain });
   createFloatingVaultTrigger();
@@ -100,6 +112,7 @@ if (isSecurePassTab) {
   let autofillData = null;
 
   function createFloatingVaultTrigger() {
+    if (isPhishingPage) return;
     if (document.getElementById("securepass-floating-trigger")) return;
 
     const btn = document.createElement("button");
@@ -242,6 +255,10 @@ if (isSecurePassTab) {
   // Listen for autofill credentials relay
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "AUTOFILL_CREDENTIALS") {
+      if (isPhishingPage || (message.error && message.error.includes("Phishing"))) {
+        disableVaultForPhishing();
+        return;
+      }
       const trigText = document.getElementById("sp-trig-text");
       allLoginsData = message.allLogins || [];
 
@@ -277,6 +294,7 @@ if (isSecurePassTab) {
   });
 
   function showExtensionVaultWidget(credsList, statusType = "ready") {
+    if (isPhishingPage) return;
     if (document.getElementById("securepass-extension-vault-popup")) return;
 
     const popup = document.createElement("div");
@@ -707,12 +725,18 @@ if (isSecurePassTab) {
   // ==========================================
   // AUTOMATIC AI PHISHING PROTECTION
   // ==========================================
-  const SAFE_DOMAINS_LIST = ["google.", "bing.com", "duckduckgo.com", "yahoo.com", "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com", "amazon.com", "wikipedia.org", "localhost"];
+  const SAFE_DOMAINS_LIST = [
+    "google.", "bing.com", "duckduckgo.com", "yahoo.com", "facebook.com", 
+    "github.com", "youtube.com", "microsoft.com", "apple.com", "amazon.com", 
+    "wikipedia.org", "localhost", "whatsapp.com", "whatsapp.net", "web.whatsapp.com", 
+    "meta.com", "messenger.com"
+  ];
   const currentHref = window.location.href.toLowerCase();
 
   if (!SAFE_DOMAINS_LIST.some(d => currentHref.includes(d))) {
     chrome.runtime.sendMessage({ type: "CHECK_URL_PHISHING", url: window.location.href }, (res) => {
       if (res && res.isPhishing) {
+        disableVaultForPhishing();
         showPhishingWarningOverlay(res.result, window.location.href);
       }
     });
@@ -721,12 +745,14 @@ if (isSecurePassTab) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "PHISHING_WARNING") {
       if (!SAFE_DOMAINS_LIST.some(d => (message.url || "").toLowerCase().includes(d))) {
+        disableVaultForPhishing();
         showPhishingWarningOverlay(message.result, message.url);
       }
     }
   });
 
   function showPhishingWarningOverlay(result, url) {
+    disableVaultForPhishing();
     if (document.getElementById("securepass-phishing-warning-toast")) return;
 
     const overlay = document.createElement("div");

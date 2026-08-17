@@ -6,7 +6,8 @@ const SAFE_DOMAINS_WHITELIST = [
   "bing.com", "duckduckgo.com", "yahoo.com", "baidu.com", "yandex.com",
   "facebook.com", "github.com", "youtube.com", "microsoft.com", "apple.com",
   "amazon.com", "wikipedia.org", "linkedin.com", "twitter.com", "x.com",
-  "instagram.com", "reddit.com", "stackoverflow.com", "localhost"
+  "instagram.com", "reddit.com", "stackoverflow.com", "localhost",
+  "whatsapp.com", "whatsapp.net", "web.whatsapp.com", "meta.com", "messenger.com"
 ];
 
 // Helper: Scan URL against SecurePass AI Phishing Backend
@@ -121,24 +122,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 2. Regular Content Script requests credentials for a domain
   if (message.type === "GET_CREDENTIALS") {
-    if (!securepassTabId) {
-      // Find SecurePass tab if it wasn't registered automatically
-      findSecurePassTab().then(tabId => {
-        if (tabId) {
-          securepassTabId = tabId;
-          queryWebTabForCredentials(message.domain, sender.tab.id);
-        } else {
-          // Send back empty response since no web app is open
-          chrome.tabs.sendMessage(sender.tab.id, { 
-            type: "AUTOFILL_CREDENTIALS", 
-            data: null, 
-            error: "SecurePass web app dashboard is not open. Please open and unlock it." 
+    const tabUrl = sender.tab ? sender.tab.url : "";
+    scanUrlWithAi(tabUrl).then(scanRes => {
+      if (scanRes && (!scanRes.is_safe || scanRes.prediction === "bad" || scanRes.prediction === "phishing")) {
+        console.warn("🔒 Refusing vault credentials for phishing site:", tabUrl);
+        if (sender.tab && sender.tab.id) {
+          chrome.tabs.sendMessage(sender.tab.id, {
+            type: "AUTOFILL_CREDENTIALS",
+            data: null,
+            error: "Phishing site detected. Password vault access blocked for safety."
           });
         }
-      });
-    } else {
-      queryWebTabForCredentials(message.domain, sender.tab.id);
-    }
+        return;
+      }
+      if (!securepassTabId) {
+        findSecurePassTab().then(tabId => {
+          if (tabId) {
+            securepassTabId = tabId;
+            queryWebTabForCredentials(message.domain, sender.tab.id);
+          } else {
+            chrome.tabs.sendMessage(sender.tab.id, { 
+              type: "AUTOFILL_CREDENTIALS", 
+              data: null, 
+              error: "SecurePass web app dashboard is not open. Please open and unlock it." 
+            });
+          }
+        });
+      } else {
+        queryWebTabForCredentials(message.domain, sender.tab.id);
+      }
+    });
     sendResponse({ status: "searching" });
     return true;
   }
@@ -187,38 +200,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 5. Popup requests status
   if (message.type === "POPUP_GET_STATUS") {
-    findSecurePassTab().then(tabId => {
-      if (tabId) {
-        securepassTabId = tabId;
-        sendResponse({ connected: true });
-      } else {
-        securepassTabId = null;
-        sendResponse({ connected: false });
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      let isPhishing = false;
+      let tabUrl = "";
+      if (tabs.length > 0 && tabs[0].url) {
+        tabUrl = tabs[0].url;
+        const scanRes = await scanUrlWithAi(tabUrl);
+        if (scanRes && (!scanRes.is_safe || scanRes.prediction === "bad" || scanRes.prediction === "phishing")) {
+          isPhishing = true;
+        }
       }
+      findSecurePassTab().then(tabId => {
+        if (tabId) {
+          securepassTabId = tabId;
+          sendResponse({ connected: true, isPhishing, url: tabUrl });
+        } else {
+          securepassTabId = null;
+          sendResponse({ connected: false, isPhishing, url: tabUrl });
+        }
+      });
     });
     return true; // async
   }
 
   // 6. Popup requests credentials list for current domain
   if (message.type === "POPUP_GET_CREDENTIALS") {
-    if (securepassTabId) {
-      // Relay request to SecurePass tab, which will send response back
-      // Since it's async, we can setup a temporary response path,
-      // or we can query the web app tab using a specific message
-      // We will tell the Web App to relay credentials and target this request.
-      // But wait! Since popup runs in its own context, the RELAY_CREDENTIALS message
-      // can be captured by background, and background can relay it to the popup.
-      // To handle this, we can store the popup listener's sendResponse callback
-      // or simply broadcast a message that popup is listening to.
-      // Let's broadcast "POPUP_CREDENTIALS_RESULT" which the popup's chrome.runtime.onMessage will listen to!
-      chrome.tabs.sendMessage(securepassTabId, {
-        type: "REQ_POPUP_CREDENTIALS",
-        domain: message.domain
-      });
-      sendResponse({ status: "requested" });
-    } else {
-      sendResponse({ error: "SecurePass web app not connected" });
-    }
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs.length > 0 && tabs[0].url) {
+        const scanRes = await scanUrlWithAi(tabs[0].url);
+        if (scanRes && (!scanRes.is_safe || scanRes.prediction === "bad" || scanRes.prediction === "phishing")) {
+          chrome.runtime.sendMessage({
+            type: "POPUP_CREDENTIALS_RESULT",
+            credentials: [],
+            isPhishing: true,
+            domain: message.domain
+          });
+          sendResponse({ status: "phishing_blocked" });
+          return;
+        }
+      }
+      if (securepassTabId) {
+        chrome.tabs.sendMessage(securepassTabId, {
+          type: "REQ_POPUP_CREDENTIALS",
+          domain: message.domain
+        });
+        sendResponse({ status: "requested" });
+      } else {
+        sendResponse({ error: "SecurePass web app not connected" });
+      }
+    });
     return true;
   }
 

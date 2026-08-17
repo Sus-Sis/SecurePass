@@ -1,12 +1,15 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const screenDisconnected = document.getElementById("screen-disconnected");
   const screenConnected = document.getElementById("screen-connected");
+  const screenPhishing = document.getElementById("screen-phishing");
   const currentDomainDisplay = document.getElementById("current-domain-display");
+  const phishingDomainDisplay = document.getElementById("phishing-domain-display");
   const credentialsList = document.getElementById("credentials-list");
   const noCredentialsText = document.getElementById("no-credentials-text");
   
   const btnOpenLocked = document.getElementById("btn-open-dashboard-locked");
   const btnOpenConnected = document.getElementById("btn-open-dashboard");
+  const btnPhishingClose = document.getElementById("btn-phishing-close");
   const toast = document.getElementById("toast");
 
   let currentDomain = "";
@@ -34,10 +37,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     checkStatus();
   });
 
+  function showPhishingScreen() {
+    screenDisconnected.classList.add("hidden");
+    screenConnected.classList.add("hidden");
+    screenPhishing.classList.remove("hidden");
+    if (phishingDomainDisplay) {
+      phishingDomainDisplay.textContent = currentDomain || "this domain";
+    }
+  }
+
   function checkStatus() {
     chrome.runtime.sendMessage({ type: "POPUP_GET_STATUS" }, (res) => {
       console.log("Popup status check response:", res);
+      if (res && res.isPhishing) {
+        showPhishingScreen();
+        return;
+      }
       if (res && res.connected) {
+        screenPhishing.classList.add("hidden");
         screenDisconnected.classList.add("hidden");
         screenConnected.classList.remove("hidden");
         
@@ -51,6 +68,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           noCredentialsText.classList.remove("hidden");
         }
       } else {
+        screenPhishing.classList.add("hidden");
         screenDisconnected.classList.remove("hidden");
         screenConnected.classList.add("hidden");
       }
@@ -60,6 +78,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 3. Listen for credential results relayed from background
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "POPUP_CREDENTIALS_RESULT") {
+      if (message.isPhishing) {
+        showPhishingScreen();
+        return;
+      }
       const creds = message.credentials || [];
       renderCredentials(creds);
     }
@@ -134,4 +156,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
   btnOpenLocked.onclick = openDashboard;
   btnOpenConnected.onclick = openDashboard;
+  if (btnPhishingClose) {
+    btnPhishingClose.onclick = () => {
+      window.close();
+    };
+  }
 });
