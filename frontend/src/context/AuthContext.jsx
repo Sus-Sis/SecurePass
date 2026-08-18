@@ -85,7 +85,7 @@ export function AuthProvider({ children }) {
           
           try {
             const meRes = await api.getMe(savedToken);
-            setUser({ email: meRes.email, mfa_enabled: meRes.mfa_enabled, is_admin: meRes.is_admin });
+            setUser({ email: meRes.email, is_admin: meRes.is_admin });
           } catch (e) {
             setUser({ email: savedEmail, is_admin: false });
           }
@@ -106,7 +106,6 @@ export function AuthProvider({ children }) {
         setUser((prev) => ({
           ...(prev || {}),
           email: meRes.email,
-          mfa_enabled: meRes.mfa_enabled,
           is_admin: meRes.is_admin
         }));
       }).catch(() => {});
@@ -151,13 +150,13 @@ export function AuthProvider({ children }) {
   const fetchUserDetails = async (authToken, defaultEmail) => {
     try {
       const meRes = await api.getMe(authToken);
-      return { email: meRes.email, mfa_enabled: meRes.mfa_enabled, is_admin: meRes.is_admin };
+      return { email: meRes.email, is_admin: meRes.is_admin };
     } catch (e) {
       return { email: defaultEmail, is_admin: false };
     }
   };
 
-  const login = async (email, password, mfaCode = null) => {
+  const login = async (email, password) => {
     setLoading(true);
     try {
       const { aHex, AHex } = generateSrpClientEphemeral();
@@ -168,11 +167,7 @@ export function AuthProvider({ children }) {
       if (!server_B || kdf_type === "pbkdf2") {
         const mk = await deriveMasterKey(password, salt, null);
         const legacyVerifier = await computeAuthVerifier(mk);
-        const res = await api.login(email, legacyVerifier, mfaCode);
-
-        if (res.mfa_required) {
-          return { mfaRequired: true };
-        }
+        const res = await api.login(email, legacyVerifier);
 
         const userDetails = await fetchUserDetails(res.access_token, email);
 
@@ -195,11 +190,7 @@ export function AuthProvider({ children }) {
       const mkBytes = await getRawMasterKeyBytes(mk);
       
       const { M1Hex, M2Hex } = await computeSrpClientProof(salt, AHex, server_B, aHex, mkBytes);
-      const authRes = await api.srpAuthenticate(email, AHex, M1Hex, mfaCode);
-
-      if (authRes.mfa_required) {
-        return { mfaRequired: true };
-      }
+      const authRes = await api.srpAuthenticate(email, AHex, M1Hex);
 
       if (authRes.server_M2 && authRes.server_M2.toLowerCase() !== M2Hex.toLowerCase()) {
         throw new Error("Server authentication proof verification failed (MITM detected)");

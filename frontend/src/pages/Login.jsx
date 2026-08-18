@@ -19,8 +19,6 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mfaCode, setMfaCode] = useState("");
-  const [mfaRequired, setMfaRequired] = useState(false);
   
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -62,10 +60,8 @@ export default function Login() {
         navigate("/vault", { replace: true });
       } else {
         // Login mode
-        const result = await login(email, password, mfaRequired ? mfaCode : null);
-        if (result && result.mfaRequired) {
-          setMfaRequired(true);
-        } else if (result && result.success) {
+        const result = await login(email, password);
+        if (result && result.success) {
           navigate("/vault", { replace: true });
         }
       }
@@ -424,80 +420,57 @@ export default function Login() {
         {error && <div className="alert alert-danger">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          {!mfaRequired ? (
-            <>
-              <div className="form-group">
-                <label className="form-label" htmlFor="login-email">Email Address</label>
-                <input
-                  id="login-email"
-                  type="email"
-                  className="form-input"
-                  placeholder="name@domain.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={loading}
-                />
-              </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="login-email">Email Address</label>
+            <input
+              id="login-email"
+              type="email"
+              className="form-input"
+              placeholder="name@domain.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              disabled={loading}
+            />
+          </div>
 
-              <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label className="form-label" htmlFor="login-password">Master Password</label>
-                  <button 
-                    type="button" 
-                    className="nav-link" 
-                    style={{ background: 'none', border: 'none', fontSize: '0.8rem', padding: 0, textDecoration: 'underline' }}
-                    onClick={() => setIsRecoveryMode(true)}
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
-                <div className="input-wrapper">
-                  <input
-                    id="login-password"
-                    type={showPassword ? "text" : "password"}
-                    className="form-input form-input-icon-right"
-                    placeholder="Master password..."
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    disabled={loading}
-                  />
-                  <button
-                    type="button"
-                    className="input-icon-btn"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? (
-                      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 19c-7 0-11-7-11-7a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 7 11 7a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-                    ) : (
-                      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="form-group">
-              <label className="form-label" htmlFor="mfa-code">MFA Verification Code</label>
-              <input
-                id="mfa-code"
-                type="text"
-                className="form-input"
-                placeholder="6-digit authenticator code..."
-                value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value)}
-                required
-                maxLength="6"
-                disabled={loading}
-                autoFocus
-              />
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Multi-factor authentication is active. Enter the code from your app.
-              </p>
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className="form-label" htmlFor="login-password">Master Password</label>
+              <button 
+                type="button" 
+                className="nav-link" 
+                style={{ background: 'none', border: 'none', fontSize: '0.8rem', padding: 0, textDecoration: 'underline' }}
+                onClick={() => setIsRecoveryMode(true)}
+              >
+                Forgot Password?
+              </button>
             </div>
-          )}
+            <div className="input-wrapper">
+              <input
+                id="login-password"
+                type={showPassword ? "text" : "password"}
+                className="form-input form-input-icon-right"
+                placeholder="Master password..."
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className="input-icon-btn"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0112 19c-7 0-11-7-11-7a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 7 11 7a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                ) : (
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                )}
+              </button>
+            </div>
+          </div>
 
           <button
             type="submit"
@@ -508,23 +481,12 @@ export default function Login() {
             {loading ? (
               <>
                 <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ marginRight: '8px', animation: 'spin 1s linear infinite' }}><circle cx="12" cy="12" r="10" opacity="0.25"></circle><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"></path></svg>
-                {mfaRequired ? "Verifying code..." : "Deriving Key & Login..."}
+                Deriving Key & Login...
               </>
             ) : (
-              mfaRequired ? "Verify and Log In" : "Log In"
+              "Log In"
             )}
           </button>
-          
-          {mfaRequired && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ width: "100%", marginTop: "0.5rem" }}
-              onClick={() => { setMfaRequired(false); setMfaCode(""); setError(""); }}
-            >
-              Cancel
-            </button>
-          )}
         </form>
 
         <div style={{ textAlign: "center", marginTop: "1.5rem" }}>

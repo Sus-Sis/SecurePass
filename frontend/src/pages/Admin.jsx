@@ -216,17 +216,7 @@ export default function Admin() {
             <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.25rem' }}>Valid JWT Tokens</div>
           </div>
 
-          {/* MFA Protection */}
-          <div style={{ background: 'rgba(30, 41, 59, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem', backdropFilter: 'blur(12px)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#94a3b8', fontSize: '0.82rem', fontWeight: 600 }}>
-              <span>MFA Enrolled Users</span>
-              <span style={{ fontSize: '1.2rem' }}>🛡️</span>
-            </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#34d399', marginTop: '0.5rem' }}>
-              {stats.mfa_users} <span style={{ fontSize: '0.9rem', color: '#94a3b8', fontWeight: 500 }}>({stats.total_users ? Math.round((stats.mfa_users / stats.total_users) * 100) : 0}%)</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#34d399', marginTop: '0.25rem' }}>TOTP Authenticator Enabled</div>
-          </div>
+
 
           {/* Locked Accounts */}
           <div style={{ background: 'rgba(30, 41, 59, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '14px', padding: '1.25rem', backdropFilter: 'blur(12px)' }}>
@@ -354,7 +344,6 @@ export default function Admin() {
                 <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.72rem' }}>
                   <th style={{ padding: '0.75rem 1rem' }}>User Email</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Role</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>MFA</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Account Status</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Sessions</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Last Login</th>
@@ -364,7 +353,7 @@ export default function Admin() {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>
+                    <td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>
                       No matching user accounts found.
                     </td>
                   </tr>
@@ -400,16 +389,7 @@ export default function Admin() {
                           )}
                         </td>
 
-                        {/* MFA */}
-                        <td style={{ padding: '0.85rem 1rem' }}>
-                          {u.mfa_enabled ? (
-                            <span style={{ color: '#34d399', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                              🟢 Enabled
-                            </span>
-                          ) : (
-                            <span style={{ color: '#94a3b8' }}>⚪ Disabled</span>
-                          )}
-                        </td>
+
 
                         {/* Status */}
                         <td style={{ padding: '0.85rem 1rem' }}>

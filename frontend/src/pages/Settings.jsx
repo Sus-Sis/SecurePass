@@ -15,34 +15,10 @@ export default function Settings() {
   const [pwdSuccess, setPwdSuccess] = useState("");
   const [newRecoveryCode, setNewRecoveryCode] = useState("");
 
-  // MFA States
-  const [mfaEnabled, setMfaEnabled] = useState(false);
-  const [mfaSetupData, setMfaSetupData] = useState(null);
-  const [mfaVerifyCode, setMfaVerifyCode] = useState("");
-  const [mfaError, setMfaError] = useState("");
-  const [mfaSuccess, setMfaSuccess] = useState("");
-  const [showMfaModal, setShowMfaModal] = useState(false);
-  const [mfaDisableCode, setMfaDisableCode] = useState("");
-
-  // Export States
-  const [exportWarning, setExportWarning] = useState(false);
-
-  // Delete Account States
-  const [deleteEmailConfirm, setDeleteEmailConfirm] = useState("");
-  const [deleteError, setDeleteError] = useState("");
-
-  // Activity Logs States
-  const [logs, setLogs] = useState([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-
-  // General Message State
-  const [toastMessage, setToastMessage] = useState("");
-
   useEffect(() => {
     if (user?.is_admin) {
       fetchLogs();
     }
-    checkUserMfaStatus();
   }, [user]);
 
   const showToast = (msg) => {
@@ -63,14 +39,19 @@ export default function Settings() {
     }
   };
 
-  const checkUserMfaStatus = async () => {
-    if (!token) return;
-    try {
-      const res = await api.getMe(token);
-      setMfaEnabled(res.mfa_enabled);
-    } catch (e) {
-      showToast("Failed to fetch user security status.");
-    }
+
+
+  const handleExportVault = () => {
+    if (!decryptedVault) return;
+    const element = document.createElement("a");
+    const file = new Blob([JSON.stringify(decryptedVault, null, 2)], { type: "application/json" });
+    element.href = URL.createObjectURL(file);
+    element.download = `SecurePass-DecryptedVault-${user?.email}.json`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+    setExportWarning(false);
+    showToast("Vault exported successfully.");
   };
 
   const handleChangePasswordSubmit = async (e) => {
@@ -99,62 +80,6 @@ export default function Settings() {
     } catch (err) {
       setPwdError(err.message || "Failed to update master password.");
     }
-  };
-
-  const handleInitiateMfa = async () => {
-    setMfaError("");
-    setMfaSuccess("");
-    try {
-      const res = await api.enableMFA(token);
-      setMfaSetupData(res);
-      setShowMfaModal(true);
-    } catch (err) {
-      setMfaError("MFA setup failed: " + err.message);
-    }
-  };
-
-  const handleVerifyMfaSubmit = async (e) => {
-    e.preventDefault();
-    setMfaError("");
-    try {
-      await api.verifyMFA(token, mfaVerifyCode);
-      setMfaSuccess("MFA successfully enabled!");
-      setMfaEnabled(true);
-      setShowMfaModal(false);
-      setMfaSetupData(null);
-      setMfaVerifyCode("");
-      fetchLogs();
-    } catch (err) {
-      setMfaError("Invalid code. Please try again.");
-    }
-  };
-
-  const handleDisableMfa = async (e) => {
-    e.preventDefault();
-    setMfaError("");
-    setMfaSuccess("");
-    try {
-      await api.disableMFA(token, mfaDisableCode);
-      setMfaSuccess("MFA successfully disabled!");
-      setMfaEnabled(false);
-      setMfaDisableCode("");
-      fetchLogs();
-    } catch (err) {
-      setMfaError("Failed to disable MFA. Incorrect code.");
-    }
-  };
-
-  const handleExportVault = () => {
-    if (!decryptedVault) return;
-    const element = document.createElement("a");
-    const file = new Blob([JSON.stringify(decryptedVault, null, 2)], { type: "application/json" });
-    element.href = URL.createObjectURL(file);
-    element.download = `SecurePass-DecryptedVault-${user?.email}.json`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-    setExportWarning(false);
-    showToast("Vault exported successfully.");
   };
 
   const handleDeleteAccountSubmit = async (e) => {
@@ -260,44 +185,7 @@ export default function Settings() {
         )}
       </section>
 
-      {/* 2. Multi-Factor Authentication Section */}
-      <section className="card settings-section">
-        <h2 className="settings-section-title">Multi-Factor Authentication (MFA)</h2>
-        
-        {mfaError && <div className="alert alert-danger">{mfaError}</div>}
-        {mfaSuccess && <div className="alert alert-success">{mfaSuccess}</div>}
 
-        <div className="settings-row">
-          <div className="settings-info">
-            <span className="settings-title">TOTP Authenticator Apps</span>
-            <span className="settings-desc">
-              Secure your account by requiring an authenticator code (like Google Authenticator or Authy) on login attempts.
-            </span>
-          </div>
-          <div>
-            {!mfaEnabled ? (
-              <button onClick={handleInitiateMfa} className="btn btn-primary">
-                Enable MFA
-              </button>
-            ) : (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Code to disable..." 
-                  maxLength="6"
-                  style={{ width: '150px', padding: '0.5rem' }}
-                  value={mfaDisableCode}
-                  onChange={(e) => setMfaDisableCode(e.target.value)}
-                />
-                <button onClick={handleDisableMfa} className="btn btn-danger">
-                  Disable MFA
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
 
       {/* 3. Export Decrypted Vault Section */}
       <section className="card settings-section">
@@ -392,60 +280,7 @@ export default function Settings() {
         </form>
       </section>
 
-      {/* MFA Verification Modal */}
-      {showMfaModal && mfaSetupData && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h2 className="modal-title">Enable Authenticator App MFA</h2>
-              <button onClick={() => { setShowMfaModal(false); setMfaSetupData(null); }} className="btn-icon">
-                <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
-            </div>
-            
-            <form onSubmit={handleVerifyMfaSubmit}>
-              <div className="modal-body">
-                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                  Scan the QR code below using your authenticator app (such as Google Authenticator, Microsoft Authenticator, Authy, or Duo).
-                </p>
-                
-                <div className="mfa-qr-container">
-                  <div className="mfa-qr-code">
-                    <img src={mfaSetupData.qr_code_url} alt="MFA QR Code" />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Or enter this code manually:</p>
-                    <div className="mfa-secret-text">{mfaSetupData.secret}</div>
-                  </div>
-                </div>
 
-                <div className="form-group" style={{ marginTop: '1.5rem' }}>
-                  <label className="form-label">Enter Authenticator Verification Code</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="6-digit code"
-                    maxLength="6"
-                    value={mfaVerifyCode}
-                    onChange={(e) => setMfaVerifyCode(e.target.value)}
-                    required
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button type="button" onClick={() => { setShowMfaModal(false); setMfaSetupData(null); }} className="btn btn-secondary">
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-success">
-                  Verify & Enable
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Export Confirmation Warning Modal */}
       {exportWarning && (

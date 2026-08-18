@@ -42,26 +42,17 @@ export const api = {
   srpChallenge: (email, client_A) => 
     request("/api/auth/srp/challenge", "POST", { email, client_A }),
     
-  srpAuthenticate: (email, client_A, client_M1, mfaCode = null) => 
-    request("/api/auth/srp/authenticate", "POST", { email, client_A, client_M1, mfa_code: mfaCode }),
+  srpAuthenticate: (email, client_A, client_M1) => 
+    request("/api/auth/srp/authenticate", "POST", { email, client_A, client_M1 }),
 
-  login: (email, verifier, mfaCode = null) => 
-    request("/api/auth/login", "POST", { email, verifier, mfa_code: mfaCode }),
+  login: (email, verifier) => 
+    request("/api/auth/login", "POST", { email, verifier }),
     
   logout: (token) => request("/api/auth/logout", "POST", null, token),
   
   getMe: (token) => request("/api/auth/me", "GET", null, token),
   
   deleteAccount: (token) => request("/api/auth/delete-account", "DELETE", null, token),
-
-  // MFA
-  enableMFA: (token) => request("/api/auth/mfa/enable", "POST", null, token),
-  
-  verifyMFA: (token, totpCode) => 
-    request("/api/auth/mfa/verify", "POST", { totp_code: totpCode }, token),
-    
-  disableMFA: (token, totpCode) => 
-    request("/api/auth/mfa/disable", "POST", { totp_code: totpCode }, token),
 
   // Vault
   getVault: (token) => request("/api/vault", "GET", null, token),
