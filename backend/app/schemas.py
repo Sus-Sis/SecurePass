@@ -24,7 +24,6 @@ class UserRegisterResponse(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     verifier: str
-    mfa_code: Optional[str] = None
 
 class PreloginRequest(BaseModel):
     email: EmailStr
@@ -48,7 +47,6 @@ class SRPAuthenticateRequest(BaseModel):
     email: EmailStr
     client_A: str
     client_M1: str
-    mfa_code: Optional[str] = None
 
 class SRPAuthenticateResponse(BaseModel):
     access_token: Optional[str] = None
@@ -57,7 +55,6 @@ class SRPAuthenticateResponse(BaseModel):
     salt: Optional[str] = None
     kdf_type: Optional[str] = "argon2id"
     kdf_params: Optional[Dict[str, Any]] = None
-    mfa_required: bool = False
     message: Optional[str] = None
 
 class URLScanRequest(BaseModel):
@@ -75,24 +72,12 @@ class LoginResponse(BaseModel):
     salt: Optional[str] = None
     kdf_type: Optional[str] = "argon2id"
     kdf_params: Optional[Dict[str, Any]] = None
-    mfa_required: bool = False
     message: Optional[str] = None
 
 class LogoutRequest(BaseModel):
     access_token: str
 
 class LogoutResponse(BaseModel):
-    message: str
-
-class MFAEnableResponse(BaseModel):
-    qr_code_url: str
-    secret: str
-
-class MFAVerifyRequest(BaseModel):
-    totp_code: str
-
-class MFAVerifyResponse(BaseModel):
-    verified: bool
     message: str
 
 class VaultResponse(BaseModel):
@@ -151,7 +136,6 @@ class ChangePasswordRequest(BaseModel):
 
 class UserMeResponse(BaseModel):
     email: EmailStr
-    mfa_enabled: bool
     is_admin: bool = False
 
 class MessageResponse(BaseModel):
@@ -161,7 +145,6 @@ class AdminStatsResponse(BaseModel):
     total_users: int
     active_sessions: int
     locked_accounts: int
-    mfa_users: int
     total_logs: int
     phishing_model_status: str
 
@@ -169,7 +152,6 @@ class AdminUserItem(BaseModel):
     id: int
     email: str
     is_admin: bool
-    mfa_enabled: bool
     created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
     failed_attempts: int = 0

@@ -61,15 +61,6 @@ def delete_user_account(db: DbSession, user_id: int) -> bool:
         return True
     return False
 
-def update_mfa_secret(db: DbSession, user_id: int, secret: Optional[str], enabled: bool) -> models.User:
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if db_user:
-        db_user.mfa_secret = secret
-        db_user.mfa_enabled = enabled
-        db.commit()
-        db.refresh(db_user)
-    return db_user
-
 def increment_failed_attempts(db: DbSession, user: models.User) -> models.User:
     user.failed_attempts += 1
     if user.failed_attempts >= 10:
@@ -139,14 +130,12 @@ def get_system_stats(db: DbSession, phishing_model_active: bool = True) -> dict:
     total_users = db.query(models.User).count()
     active_sessions = db.query(models.Session).filter(models.Session.expires_at > datetime.utcnow()).count()
     locked_accounts = db.query(models.User).filter(models.User.locked_until > datetime.utcnow()).count()
-    mfa_users = db.query(models.User).filter(models.User.mfa_enabled == True).count()
     total_logs = db.query(models.ActivityLog).count()
     
     return {
         "total_users": total_users,
         "active_sessions": active_sessions,
         "locked_accounts": locked_accounts,
-        "mfa_users": mfa_users,
         "total_logs": total_logs,
         "phishing_model_status": "Active (SVM Classifier)" if phishing_model_active else "Offline"
     }
@@ -166,7 +155,6 @@ def get_all_users_for_admin(db: DbSession) -> list:
             "id": u.id,
             "email": u.email,
             "is_admin": bool(u.is_admin),
-            "mfa_enabled": bool(u.mfa_enabled),
             "created_at": u.created_at,
             "last_login": u.last_login,
             "failed_attempts": u.failed_attempts or 0,

@@ -5,10 +5,6 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 from jose import JWTError, jwt
 import bcrypt
-import pyotp
-import qrcode
-import io
-import base64
 from sqlalchemy.orm import Session as DbSession
 from . import models
 
@@ -167,27 +163,6 @@ def verify_access_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
-
-def generate_totp_secret() -> str:
-    return pyotp.random_base32()
-
-def get_totp_uri(email: str, secret: str) -> str:
-    return pyotp.totp.TOTP(secret).provisioning_uri(name=email, issuer_name="SecurePass")
-
-def generate_qr_code_base64(uri: str) -> str:
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(uri)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    buffered = io.BytesIO()
-    img.save(buffered, format="PNG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_base64}"
-
-def verify_totp(secret: str, code: str) -> bool:
-    totp = pyotp.totp.TOTP(secret)
-    return totp.verify(code, valid_window=1)
 
 def check_rate_limit_exceeded(db: DbSession, email: str) -> bool:
     one_hour_ago = datetime.utcnow() - timedelta(hours=1)

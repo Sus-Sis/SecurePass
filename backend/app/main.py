@@ -326,18 +326,6 @@ async def srp_authenticate(
             detail="Invalid email or authentication proof"
         )
         
-    if user.mfa_enabled:
-        if not req.mfa_code:
-            return schemas.SRPAuthenticateResponse(mfa_required=True, message="MFA verification required")
-            
-        if not auth.verify_totp(user.mfa_secret, req.mfa_code):
-            crud.increment_failed_attempts(db, user)
-            crud.create_activity_log(db, user.id, "login_failed_mfa", ip, ua)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid MFA verification code"
-            )
-            
     crud.reset_failed_attempts(db, user)
     user.last_login = datetime.utcnow()
     db.commit()
@@ -407,18 +395,6 @@ async def login(
             detail="Invalid email or password"
         )
         
-    if user.mfa_enabled:
-        if not login_data.mfa_code:
-            return schemas.LoginResponse(mfa_required=True, message="MFA verification required")
-            
-        if not auth.verify_totp(user.mfa_secret, login_data.mfa_code):
-            crud.increment_failed_attempts(db, user)
-            crud.create_activity_log(db, user.id, "login_failed_mfa", ip, ua)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid MFA verification code"
-            )
-            
     crud.reset_failed_attempts(db, user)
     user.last_login = datetime.utcnow()
     db.commit()
@@ -470,85 +446,8 @@ async def get_me(
 ):
     return {
         "email": current_user.email,
-        "mfa_enabled": current_user.mfa_enabled,
         "is_admin": bool(current_user.is_admin)
     }
-
-# MFA Endpoints
-
-@app.post("/api/auth/mfa/enable", response_model=schemas.MFAEnableResponse)
-async def mfa_enable(
-    request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: DbSession = Depends(get_db)
-):
-    secret = auth.generate_totp_secret()
-    crud.update_mfa_secret(db, current_user.id, secret, enabled=False)
-    
-    uri = auth.get_totp_uri(current_user.email, secret)
-    qr_code_url = auth.generate_qr_code_base64(uri)
-    
-    ip = get_client_ip(request)
-    ua = request.headers.get("user-agent", "unknown")
-    crud.create_activity_log(db, current_user.id, "mfa_setup_initiated", ip, ua)
-    
-    return schemas.MFAEnableResponse(qr_code_url=qr_code_url, secret=secret)
-
-@app.post("/api/auth/mfa/verify", response_model=schemas.MFAVerifyResponse)
-async def mfa_verify(
-    verify_data: schemas.MFAVerifyRequest,
-    request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: DbSession = Depends(get_db)
-):
-    if not current_user.mfa_secret:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA setup was not initiated"
-        )
-        
-    is_valid = auth.verify_totp(current_user.mfa_secret, verify_data.totp_code)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification code"
-        )
-        
-    crud.update_mfa_secret(db, current_user.id, current_user.mfa_secret, enabled=True)
-    
-    ip = get_client_ip(request)
-    ua = request.headers.get("user-agent", "unknown")
-    crud.create_activity_log(db, current_user.id, "mfa_enabled", ip, ua)
-    
-    return schemas.MFAVerifyResponse(verified=True, message="MFA successfully enabled")
-
-@app.post("/api/auth/mfa/disable", response_model=schemas.MessageResponse)
-async def mfa_disable(
-    verify_data: schemas.MFAVerifyRequest,
-    request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: DbSession = Depends(get_db)
-):
-    if not current_user.mfa_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is not enabled"
-        )
-        
-    is_valid = auth.verify_totp(current_user.mfa_secret, verify_data.totp_code)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification code"
-        )
-        
-    crud.update_mfa_secret(db, current_user.id, secret=None, enabled=False)
-    
-    ip = get_client_ip(request)
-    ua = request.headers.get("user-agent", "unknown")
-    crud.create_activity_log(db, current_user.id, "mfa_disabled", ip, ua)
-    
-    return {"message": "MFA has been successfully disabled"}
 
 # Vault Endpoints
 

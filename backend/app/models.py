@@ -14,8 +14,6 @@ class User(Base):
     kdf_params = Column(Text, nullable=True)  # JSON string of KDF parameters (time_cost, memory_cost, parallelism)
     encrypted_vault = Column(Text, default="[]")
     encrypted_key_recovery = Column(Text, nullable=True)
-    mfa_secret = Column(Text, nullable=True)
-    mfa_enabled = Column(Boolean, default=False)
     recovery_codes_hash = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_login = Column(DateTime, nullable=True)
