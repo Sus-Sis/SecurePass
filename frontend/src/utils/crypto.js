@@ -161,6 +161,58 @@ async function deriveRecoveryMasterKey(recoveryCode) {
   );
 }
 
+export async function deriveEmailRecoveryMasterKey(email, saltHex) {
+  const combinedStr = `securepass_recovery:${email.toLowerCase().trim()}:${saltHex}`;
+  const codeBytes = encoder.encode(combinedStr);
+  const rmkBuffer = await window.crypto.subtle.digest("SHA-256", codeBytes);
+  
+  return await window.crypto.subtle.importKey(
+    "raw",
+    rmkBuffer,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+export async function encryptMasterKeyWithEmailRecovery(masterKey, email, saltHex) {
+  const rawMK = await window.crypto.subtle.exportKey("raw", masterKey);
+  const rmk = await deriveEmailRecoveryMasterKey(email, saltHex);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encryptedBuffer = await window.crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv },
+    rmk,
+    rawMK
+  );
+
+  return `${bufferToBase64(iv)}.${bufferToBase64(encryptedBuffer)}`;
+}
+
+export async function decryptMasterKeyWithEmailRecovery(encryptedMKStr, email, saltHex) {
+  const parts = encryptedMKStr.split(".");
+  if (parts.length !== 2) {
+    throw new Error("Invalid encrypted key format");
+  }
+
+  const iv = new Uint8Array(base64ToBuffer(parts[0]));
+  const ciphertext = base64ToBuffer(parts[1]);
+  const rmk = await deriveEmailRecoveryMasterKey(email, saltHex);
+
+  const decryptedRawMK = await window.crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv },
+    rmk,
+    ciphertext
+  );
+
+  return await window.crypto.subtle.importKey(
+    "raw",
+    decryptedRawMK,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
 export async function encryptMasterKeyWithRecoveryCode(masterKey, recoveryCode) {
   const rawMK = await window.crypto.subtle.exportKey("raw", masterKey);
   const rmk = await deriveRecoveryMasterKey(recoveryCode);

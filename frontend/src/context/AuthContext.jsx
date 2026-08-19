@@ -12,7 +12,9 @@ import {
   generateSalt, 
   encryptVault, 
   generateRecoveryCode, 
-  encryptMasterKeyWithRecoveryCode 
+  encryptMasterKeyWithRecoveryCode,
+  encryptMasterKeyWithEmailRecovery,
+  decryptMasterKeyWithEmailRecovery
 } from "../utils/crypto";
 
 const AuthContext = createContext(null);
@@ -113,38 +115,32 @@ export function AuthProvider({ children }) {
   }, [token]);
 
   const register = async (email, password) => {
-    setLoading(true);
-    try {
-      const kdfParams = await benchmarkArgon2Parameters(300);
-      const salt = generateSalt();
-      
-      const mk = await deriveMasterKey(password, salt, kdfParams);
-      const mkBytes = await getRawMasterKeyBytes(mk);
-      
-      const srpVerifier = await generateSrpVerifier(salt, mkBytes);
-      
-      const emptyVault = [];
-      const encryptedEmptyVault = await encryptVault(emptyVault, mk);
-      
-      const recoveryCode = generateRecoveryCode();
-      const encryptedMKRecovery = await encryptMasterKeyWithRecoveryCode(mk, recoveryCode);
-      const recoveryHash = await computeAuthVerifier(await deriveMasterKey(recoveryCode, salt));
-      
-      await api.register({
-        email,
-        salt,
-        verifier: srpVerifier,
-        kdf_type: "argon2id",
-        kdf_params: kdfParams,
-        encrypted_vault: encryptedEmptyVault,
-        encrypted_key_recovery: encryptedMKRecovery,
-        recovery_codes_hash: recoveryHash
-      });
+    const kdfParams = await benchmarkArgon2Parameters(300);
+    const salt = generateSalt();
+    
+    const mk = await deriveMasterKey(password, salt, kdfParams);
+    const mkBytes = await getRawMasterKeyBytes(mk);
+    
+    const srpVerifier = await generateSrpVerifier(salt, mkBytes);
+    
+    const emptyVault = [];
+    const encryptedEmptyVault = await encryptVault(emptyVault, mk);
+    
+    const encryptedMKRecovery = await encryptMasterKeyWithEmailRecovery(mk, email, salt);
+    const recoveryHash = await computeAuthVerifier(mk);
+    
+    await api.register({
+      email,
+      salt,
+      verifier: srpVerifier,
+      kdf_type: "argon2id",
+      kdf_params: kdfParams,
+      encrypted_vault: encryptedEmptyVault,
+      encrypted_key_recovery: encryptedMKRecovery,
+      recovery_codes_hash: recoveryHash
+    });
 
-      return { recoveryCode };
-    } finally {
-      setLoading(false);
-    }
+    return { success: true };
   };
 
   const fetchUserDetails = async (authToken, defaultEmail) => {
@@ -293,9 +289,8 @@ export function AuthProvider({ children }) {
       const newVerifier = await generateSrpVerifier(newSalt, newMKBytes);
 
       const newEncryptedVault = await encryptVault(decryptedVault, newMK);
-      const recoveryCode = generateRecoveryCode();
-      const newEncryptedMKRecovery = await encryptMasterKeyWithRecoveryCode(newMK, recoveryCode);
-      const recoveryHash = await computeAuthVerifier(await deriveMasterKey(recoveryCode, newSalt));
+      const newEncryptedMKRecovery = await encryptMasterKeyWithEmailRecovery(newMK, user.email, newSalt);
+      const recoveryHash = await computeAuthVerifier(newMK);
 
       await api.changePassword(token, {
         current_verifier: currentVerifier,
@@ -309,7 +304,7 @@ export function AuthProvider({ children }) {
 
       setMasterKey(newMK);
       setEncryptedVault(newEncryptedVault);
-      return { recoveryCode };
+      return { success: true };
     } finally {
       setLoading(false);
     }

@@ -177,3 +177,74 @@ def check_rate_limit_exceeded(db: DbSession, email: str) -> bool:
     ).count()
     
     return failed_attempts_count >= 5
+
+# Recovery OTP Storage (in-memory store with 10-min expiration)
+RECOVERY_OTP_STORE: Dict[str, dict] = {}
+
+def generate_recovery_otp(email: str) -> str:
+    email_clean = email.lower().strip()
+    otp_code = "".join([str(secrets.randbelow(10)) for _ in range(6)])
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    
+    RECOVERY_OTP_STORE[email_clean] = {
+        "otp": otp_code,
+        "expires_at": expires_at
+    }
+    
+    print(f"\n[SECUREPASS SECURITY LOG] 🔑 Emergency Recovery OTP for '{email_clean}': {otp_code} (Expires in 10 mins)\n")
+    
+    # Send actual Gmail email if SMTP environment variables are configured
+    smtp_email = os.getenv("SMTP_EMAIL", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
+    
+    if smtp_email and smtp_password:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "🔐 SecurePass - Account Recovery Verification Code"
+            msg["From"] = f"SecurePass Security <{smtp_email}>"
+            msg["To"] = email_clean
+
+            html_body = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; background: #0f172a; color: #f8fafc; border-radius: 12px; border: 1px solid #1e293b;">
+              <h2 style="color: #38bdf8; margin-top: 0;">🛡️ SecurePass Security Notice</h2>
+              <p style="font-size: 14px; color: #cbd5e1;">A request was received to recover the account associated with <strong>{email_clean}</strong>.</p>
+              <div style="background: rgba(56, 189, 248, 0.1); border: 1px dashed #38bdf8; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+                <span style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; display: block; margin-bottom: 5px;">Your 6-Digit Verification Code</span>
+                <span style="font-size: 32px; font-weight: bold; font-family: monospace; color: #38bdf8; letter-spacing: 6px;">{otp_code}</span>
+              </div>
+              <p style="font-size: 12px; color: #94a3b8;">This verification code is valid for <strong>10 minutes</strong>. If you did not initiate account recovery, please ignore this email.</p>
+            </div>
+            """
+            msg.attach(MIMEText(html_body, "html"))
+
+            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+                server.starttls()
+                server.login(smtp_email, smtp_password)
+                server.sendmail(smtp_email, email_clean, msg.as_string())
+                print(f"[Gmail SMTP Log] Successfully sent OTP email to {email_clean} via Gmail!")
+        except Exception as e:
+            print(f"[Gmail SMTP Warning] Could not send email via SMTP: {e}")
+
+    return otp_code
+
+def verify_recovery_otp(email: str, code: str) -> bool:
+    email_clean = email.lower().strip()
+    entry = RECOVERY_OTP_STORE.get(email_clean)
+    
+    if not entry:
+        return False
+        
+    if datetime.utcnow() > entry["expires_at"]:
+        RECOVERY_OTP_STORE.pop(email_clean, None)
+        return False
+        
+    if entry["otp"] == code.strip():
+        RECOVERY_OTP_STORE.pop(email_clean, None)
+        return True
+        
+    return False
+

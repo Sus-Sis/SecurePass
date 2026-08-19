@@ -174,15 +174,6 @@ export default function Settings() {
             Update Master Password
           </button>
         </form>
-
-        {newRecoveryCode && (
-          <div className="recovery-box" style={{ marginTop: '1rem' }}>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Your password has been changed! Here is your NEW recovery code:
-            </p>
-            <div className="recovery-code-display">{newRecoveryCode}</div>
-          </div>
-        )}
       </section>
 
 

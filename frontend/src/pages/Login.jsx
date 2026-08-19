@@ -3,13 +3,16 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../utils/api";
 import { 
-  decryptMasterKeyWithRecoveryCode, 
   decryptVault, 
   deriveMasterKey, 
   computeAuthVerifier, 
-  encryptMasterKeyWithRecoveryCode, 
   encryptVault,
-  generateRecoveryCode
+  generateSalt,
+  getRawMasterKeyBytes,
+  benchmarkArgon2Parameters,
+  generateSrpVerifier,
+  decryptMasterKeyWithEmailRecovery,
+  encryptMasterKeyWithEmailRecovery
 } from "../utils/crypto";
 
 export default function Login() {
@@ -28,12 +31,11 @@ export default function Login() {
   // Recovery States
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [recoveryEmail, setRecoveryEmail] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [recoveryStep, setRecoveryStep] = useState(1);
   const [recoveryPayload, setRecoveryPayload] = useState(null);
-  const [newRecoveryCode, setNewRecoveryCode] = useState("");
 
   // Determine redirection target (always fallback to /vault)
   let targetPath = location.state?.from?.pathname || "/vault";
@@ -85,7 +87,8 @@ export default function Login() {
       setRecoveryPayload({
         salt: res.salt,
         encrypted_key_recovery: res.encrypted_key_recovery,
-        encrypted_vault: res.encrypted_vault || "[]"
+        encrypted_vault: res.encrypted_vault || "[]",
+        dev_otp: res.dev_otp
       });
       setRecoveryStep(2);
     } catch (err) {
@@ -100,6 +103,12 @@ export default function Login() {
     setError("");
     setLoading(true);
 
+    if (!otpCode || otpCode.trim().length !== 6) {
+      setError("Please enter your 6-digit email verification code.");
+      setLoading(false);
+      return;
+    }
+
     if (newPassword !== confirmNewPassword) {
       setError("Passwords do not match.");
       setLoading(false);
@@ -113,10 +122,10 @@ export default function Login() {
     }
 
     try {
-      const cleanRecoveryCode = recoveryCode.trim();
-      const oldMK = await decryptMasterKeyWithRecoveryCode(
+      const oldMK = await decryptMasterKeyWithEmailRecovery(
         recoveryPayload.encrypted_key_recovery, 
-        cleanRecoveryCode
+        recoveryEmail,
+        recoveryPayload.salt
       );
 
       const decryptedVaultArray = await decryptVault(
@@ -124,33 +133,34 @@ export default function Login() {
         oldMK
       );
 
-      const newSalt = generateRecoveryCode();
-      const newMK = await deriveMasterKey(newPassword, newSalt);
-      const newVerifier = await computeAuthVerifier(newMK);
+      const newSalt = generateSalt();
+      const newKdfParams = await benchmarkArgon2Parameters(300);
+      const newMK = await deriveMasterKey(newPassword, newSalt, newKdfParams);
+      const newMKBytes = await getRawMasterKeyBytes(newMK);
+      const newVerifier = await generateSrpVerifier(newSalt, newMKBytes);
 
       const newEncryptedVault = await encryptVault(decryptedVaultArray, newMK);
+      const newEncryptedMKRecovery = await encryptMasterKeyWithEmailRecovery(newMK, recoveryEmail, newSalt);
+      const newRecoveryHash = await computeAuthVerifier(newMK);
 
-      const generatedCode = generateRecoveryCode();
-      const newEncryptedMKRecovery = await encryptMasterKeyWithRecoveryCode(newMK, generatedCode);
-      const newRecoveryHash = await computeAuthVerifier(await deriveMasterKey(generatedCode, newSalt));
-
-      const hashedRecoverySent = await computeAuthVerifier(await deriveMasterKey(cleanRecoveryCode, recoveryPayload.salt));
-      
       await api.verifyRecovery({
         email: recoveryEmail,
-        recovery_code: hashedRecoverySent,
+        otp_code: otpCode.trim(),
+        recovery_code: "email_otp_authenticated",
         new_verifier: newVerifier,
         new_salt: newSalt,
+        new_kdf_params: newKdfParams,
         new_encrypted_vault: newEncryptedVault,
         new_encrypted_key_recovery: newEncryptedMKRecovery,
         new_recovery_codes_hash: newRecoveryHash
       });
 
-      setNewRecoveryCode(generatedCode);
-      setRecoveryStep(3);
-      setInfo("Account recovered successfully!");
+      setInfo("Account recovered & Master Password updated! Please log in below.");
+      setIsRecoveryMode(false);
+      setEmail(recoveryEmail);
+      setPassword("");
     } catch (err) {
-      setError("Failed to decrypt or recover account. Please check your recovery code. Details: " + err.message);
+      setError("Failed to recover account. Details: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -176,6 +186,7 @@ export default function Login() {
   const resetRecovery = () => {
     setIsRecoveryMode(false);
     setRecoveryEmail("");
+    setOtpCode("");
     setRecoveryCode("");
     setNewPassword("");
     setConfirmNewPassword("");
@@ -183,6 +194,7 @@ export default function Login() {
     setRecoveryPayload(null);
     setNewRecoveryCode("");
     setError("");
+    setInfo("");
   };
 
   if (token && isLocked) {
@@ -268,7 +280,7 @@ export default function Login() {
         <div className="card auth-card">
           <div className="auth-header">
             <h1 className="auth-title">Account Recovery</h1>
-            <p className="auth-subtitle">Zero-knowledge recovery decrypts your vault client-side.</p>
+            <p className="auth-subtitle">Zero-knowledge dual-factor recovery decrypts your vault client-side.</p>
           </div>
 
           {error && <div className="alert alert-danger">{error}</div>}
@@ -312,15 +324,30 @@ export default function Login() {
 
           {recoveryStep === 2 && (
             <form onSubmit={handleVerifyRecovery}>
+              {recoveryPayload?.dev_otp && (
+                <div style={{ background: 'rgba(6, 182, 212, 0.15)', border: '1px dashed var(--accent-cyan)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                    🛠️ LOCALHOST TESTING - EMAIL VERIFICATION OTP
+                  </span>
+                  <span style={{ fontFamily: 'monospace', fontSize: '1.2rem', letterSpacing: '4px', color: '#6EE7B7', fontWeight: 'bold' }}>
+                    {recoveryPayload.dev_otp}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: '#94A3B8', display: 'block', marginTop: '4px' }}>
+                    (Check backend terminal or use code above for local testing)
+                  </span>
+                </div>
+              )}
+
               <div className="form-group">
-                <label className="form-label" htmlFor="recovery-code">Recovery Code</label>
+                <label className="form-label" htmlFor="otp-code">6-Digit Email Verification Code (OTP)</label>
                 <input
-                  id="recovery-code"
+                  id="otp-code"
                   type="text"
                   className="form-input"
-                  placeholder="Enter 64-char recovery code..."
-                  value={recoveryCode}
-                  onChange={(e) => setRecoveryCode(e.target.value)}
+                  placeholder="Enter 6-digit email OTP (e.g. 123456)..."
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  maxLength={6}
                   required
                   disabled={loading}
                 />
@@ -360,7 +387,7 @@ export default function Login() {
                 style={{ width: "100%", marginTop: "1rem" }}
                 disabled={loading}
               >
-                {loading ? "Decrypting & Updating..." : "Recover Account"}
+                {loading ? "Decrypting & Updating..." : "Recover Account & Reset Password"}
               </button>
               
               <button
@@ -376,28 +403,43 @@ export default function Login() {
 
           {recoveryStep === 3 && (
             <div>
-              <div className="recovery-box">
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Your account has been recovered! Here is your NEW recovery code. Write this down or download it.
+              <div className="recovery-box" style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid var(--accent-green, #10B981)', borderRadius: '12px', padding: '1.25rem', marginBottom: '1.25rem' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                  🎉 Account Successfully Recovered!
+                </h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                  Here is your <strong>NEW Emergency Recovery Code</strong>. Save this immediately. The old recovery code has been permanently revoked.
                 </p>
-                <div className="recovery-code-display">{newRecoveryCode}</div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 'bold' }}>
-                  The old recovery code is now invalid.
+                <div className="recovery-code-display" style={{ background: 'rgba(0,0,0,0.4)', padding: '0.85rem', borderRadius: '8px', fontFamily: 'monospace', fontSize: '0.95rem', wordBreak: 'break-all', textAlign: 'center', border: '1px dashed var(--accent-purple)', color: '#6EE7B7' }}>
+                  {newRecoveryCode}
+                </div>
+                <p style={{ fontSize: '0.75rem', color: '#F87171', fontWeight: 'bold', marginTop: '0.75rem', textAlign: 'center' }}>
+                  ⚠️ Save this key safely. SecurePass cannot retrieve it for you!
                 </p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(newRecoveryCode);
+                    setInfo("New recovery code copied to clipboard!");
+                  }}
+                  className="btn btn-secondary"
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                >
+                  📋 Copy New Recovery Code
+                </button>
+                <button
                   onClick={handleDownloadNewRecoveryCode}
                   className="btn btn-secondary"
-                  style={{ width: '100%' }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                 >
-                  Download New Recovery Code (.txt)
+                  💾 Download New Recovery Code (.txt)
                 </button>
                 <button
                   onClick={resetRecovery}
                   className="btn btn-primary"
-                  style={{ width: '100%' }}
+                  style={{ width: '100%', marginTop: '0.5rem' }}
                 >
                   Go to Login
                 </button>

@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session as DbSession
 from sqlalchemy import text
 from datetime import datetime, timedelta
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from . import models, schemas, crud, auth, database
 from .database import engine, get_db
@@ -540,15 +545,18 @@ async def recovery_initiate(
         
     crud.create_activity_log(db, user.id, "recovery_initiated", ip, ua)
     
+    otp_code = auth.generate_recovery_otp(user.email)
     kdf_params_dict = json.loads(user.kdf_params) if user.kdf_params else None
     
     return schemas.RecoveryInitiateResponse(
-        message="Recovery payload successfully fetched.",
+        message="Recovery payload successfully fetched and OTP generated.",
         salt=user.salt,
         kdf_type=user.kdf_type or "argon2id",
         kdf_params=kdf_params_dict,
         encrypted_key_recovery=user.encrypted_key_recovery,
-        encrypted_vault=user.encrypted_vault
+        encrypted_vault=user.encrypted_vault,
+        otp_sent=True,
+        dev_otp=otp_code
     )
 
 @app.post("/api/auth/recovery/verify", response_model=schemas.MessageResponse)
@@ -566,19 +574,33 @@ async def recovery_verify(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Account recovery is unavailable or not set up for this email."
         )
-        
-    if not auth.verify_verifier(rec_data.recovery_code, user.recovery_codes_hash):
+
+    # 1. Enforce 6-Digit Email Verification Code (OTP) Check
+    if not auth.verify_recovery_otp(rec_data.email, rec_data.otp_code):
         crud.increment_failed_attempts(db, user)
-        crud.create_activity_log(db, user.id, "recovery_failed", ip, ua)
+        crud.create_activity_log(db, user.id, "recovery_failed_otp", ip, ua)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid recovery code."
+            detail="Invalid or expired 6-digit email verification code."
         )
+
+    # 2. Verify Recovery Code if provided
+    if rec_data.recovery_code != "email_otp_authenticated":
+        if not auth.verify_verifier(rec_data.recovery_code, user.recovery_codes_hash):
+            crud.increment_failed_attempts(db, user)
+            crud.create_activity_log(db, user.id, "recovery_failed_code", ip, ua)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Emergency Recovery Code."
+            )
         
     stored_verifier = rec_data.new_verifier
     if not rec_data.new_verifier.startswith("$2b$") and len(rec_data.new_verifier) < 60:
         stored_verifier = auth.hash_verifier(rec_data.new_verifier)
-    new_hashed_recovery = auth.hash_verifier(rec_data.recovery_code)
+    
+    new_hashed_recovery = rec_data.new_recovery_codes_hash
+    if rec_data.new_recovery_codes_hash and not rec_data.new_recovery_codes_hash.startswith("$2b$"):
+        new_hashed_recovery = auth.hash_verifier(rec_data.new_recovery_codes_hash)
     
     crud.update_user_security(
         db=db,

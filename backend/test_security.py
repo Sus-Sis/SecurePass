@@ -208,6 +208,51 @@ class TestSecurePassSecurity(unittest.TestCase):
         self.assertEqual(res_vault_after.status_code, 401)
         print("✓ Logout session invalidation passes")
 
+    def test_06_dual_factor_account_recovery(self):
+        print("\nChecking Dual-Factor Email OTP Account Recovery...")
+        # 1. Register User
+        client.post("/api/auth/register", json={
+            "email": self.email,
+            "salt": self.salt,
+            "verifier": self.raw_verifier,
+            "kdf_type": "argon2id",
+            "kdf_params": self.kdf_params,
+            "encrypted_vault": self.encrypted_vault,
+            "encrypted_key_recovery": self.recovery_key,
+            "recovery_codes_hash": self.recovery_codes_hash
+        })
+
+        # 2. Initiate recovery & get OTP
+        init_res = client.post("/api/auth/recovery/initiate", json={"email": self.email})
+        self.assertEqual(init_res.status_code, 200)
+        otp = init_res.json()["dev_otp"]
+        self.assertTrue(len(otp) == 6)
+
+        # 3. Attempt verify with wrong OTP (should fail 401)
+        bad_res = client.post("/api/auth/recovery/verify", json={
+            "email": self.email,
+            "otp_code": "000000",
+            "recovery_code": self.recovery_codes_hash,
+            "new_verifier": "new_verifier_hash",
+            "new_salt": "new_salt_128",
+            "new_encrypted_vault": "new_vault",
+            "new_encrypted_key_recovery": "new_rec_key"
+        })
+        self.assertEqual(bad_res.status_code, 401)
+
+        # 4. Verify with correct OTP & Recovery Code (should succeed 200)
+        good_res = client.post("/api/auth/recovery/verify", json={
+            "email": self.email,
+            "otp_code": otp,
+            "recovery_code": self.recovery_codes_hash,
+            "new_verifier": "new_verifier_hash",
+            "new_salt": "new_salt_128",
+            "new_encrypted_vault": "new_vault",
+            "new_encrypted_key_recovery": "new_rec_key"
+        })
+        self.assertEqual(good_res.status_code, 200)
+        print("✓ Dual-Factor Email OTP Account Recovery passes")
+
 if __name__ == "__main__":
     print("==================================================")
     print("      RUNNING SECUREPASS SECURITY TEST CASES      ")

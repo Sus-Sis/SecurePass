@@ -115,15 +115,19 @@ class RecoveryInitiateResponse(BaseModel):
     kdf_params: Optional[Dict[str, Any]] = None
     encrypted_key_recovery: Optional[str] = None
     encrypted_vault: Optional[str] = None
+    otp_sent: bool = True
+    dev_otp: Optional[str] = None
 
 class RecoveryVerifyRequest(BaseModel):
     email: EmailStr
+    otp_code: str
     recovery_code: str
     new_verifier: str
     new_salt: str
     new_kdf_params: Optional[Dict[str, Any]] = None
     new_encrypted_vault: str
     new_encrypted_key_recovery: str
+    new_recovery_codes_hash: Optional[str] = None
 
 class ChangePasswordRequest(BaseModel):
     current_verifier: str
